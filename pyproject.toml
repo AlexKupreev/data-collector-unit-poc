@@ -1,0 +1,87 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "dagster-databox-poc"
+dynamic = ["version"]
+description = ""
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+keywords = []
+authors = [
+  { name = "Alexander Kupreyeu", email = "email@example.com" },
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Programming Language :: Python",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12"
+]
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["ruff", "basedpyright"]
+test = ["pytest"]
+notebook = ["jupyter"]
+orchestrator = [
+  "dagster",
+  "dagster-webserver",
+]
+
+[project.urls]
+Documentation = "https://github.com/AlexKupreev/dagster-databox-poc#readme"
+Issues = "https://github.com/AlexKupreev/dagster-databox-poc/issues"
+Source = "https://github.com/AlexKupreev/dagster-databox-poc"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.version]
+path = "src/dagster_databox_poc/__about__.py"
+
+[tool.hatch.envs.default]
+pre-install-commands = ["echo 'start env installation'"]
+post-install-commands = ["echo 'end env installation'"]
+python = "3.11"
+installer = "uv"
+type = "virtual"
+path = ".venv"
+features = ["orchestrator"]
+
+[tool.hatch.envs.dev]
+features = ["dev", "test", "notebook", "orchestrator"]
+
+[tool.hatch.envs.prod]
+features = ["orchestrator"]
+
+[tool.hatch.envs.test]
+path = ".venv_test"
+features = ["test"]
+
+[tool.hatch.envs.types]
+extra-dependencies = [
+  "mypy>=1.0.0",
+]
+[tool.hatch.envs.types.scripts]
+check = "mypy --install-types --non-interactive {args:src/dagster_databox_poc tests}"
+
+[tool.coverage.run]
+source_pkgs = ["dagster_databox_poc", "tests"]
+branch = true
+parallel = true
+omit = [
+  "src/dagster_databox_poc/__about__.py",
+]
+
+[tool.coverage.paths]
+dagster_databox = ["src/dagster_databox_poc", "*/dagster-databox/src/dagster_databox_poc"]
+tests = ["tests", "*/dagster-databox/tests"]
+
+[tool.coverage.report]
+exclude_lines = [
+  "no cov",
+  "if __name__ == .__main__.:",
+  "if TYPE_CHECKING:",
+]
