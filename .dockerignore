@@ -1,0 +1,7 @@
+.venv/
+docs/
+notebooks/
+__pycache__/
+
+*.db
+*.db.lock

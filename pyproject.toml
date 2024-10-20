@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "dagster-databox-poc"
+name = "data-collector-unit-poc"
 dynamic = ["version"]
 description = ""
 readme = "README.md"
@@ -11,7 +11,7 @@ requires-python = ">=3.11"
 license = "MIT"
 keywords = []
 authors = [
-  { name = "Alexander Kupreyeu", email = "email@example.com" },
+  { name = "Alexander Kupreyeu" },
 ]
 classifiers = [
   "Development Status :: 4 - Beta",
@@ -19,27 +19,50 @@ classifiers = [
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12"
 ]
-dependencies = []
+dependencies = [
+  "numpy>=2.1.0",
+  "pandas>=2.2.2",
+  "scikit-learn>=1.5.1",
+  "python-dotenv>=1.0.1",
+  "httpx>=0.27.0",
+  "more-itertools>=10.5.0",
+  "SQLAlchemy>2.0.0",
+  "alembic",
+  "aiosqlite"
+]
 
 [project.optional-dependencies]
 dev = ["ruff", "basedpyright"]
 test = ["pytest"]
-notebook = ["jupyter"]
+notebook = [
+  "jupyter",
+  "tqdm>=4.66.5",
+]
 orchestrator = [
-  "dagster",
-  "dagster-webserver",
+  "apscheduler",
+]
+nicegui = [
+  "nicegui"
+]
+server = [
+  "fastapi[standard]",
+  "fastapi-cors",
+  "fastapi-users[sqlalchemy]",
+  "uvicorn",
+  "sqladmin[full]",
+  "boto3"
 ]
 
 [project.urls]
-Documentation = "https://github.com/AlexKupreev/dagster-databox-poc#readme"
-Issues = "https://github.com/AlexKupreev/dagster-databox-poc/issues"
-Source = "https://github.com/AlexKupreev/dagster-databox-poc"
+Documentation = "https://github.com/AlexKupreev/data-collector-unit-poc#readme"
+Issues = "https://github.com/AlexKupreev/data-collector-unit-poc/issues"
+Source = "https://github.com/AlexKupreev/data-collector-unit-poc"
 
 [tool.hatch.metadata]
 allow-direct-references = true
 
 [tool.hatch.version]
-path = "src/dagster_databox_poc/__about__.py"
+path = "src/data_collector_unit_poc/__about__.py"
 
 [tool.hatch.envs.default]
 pre-install-commands = ["echo 'start env installation'"]
@@ -48,13 +71,19 @@ python = "3.11"
 installer = "uv"
 type = "virtual"
 path = ".venv"
-features = ["orchestrator"]
+features = ["dev", "test", "notebook", "server", "nicegui", "orchestrator"]
+[tool.hatch.envs.default.scripts]
+jobs = "dagster dev -h 0.0.0.0 -p 3000"
 
-[tool.hatch.envs.dev]
-features = ["dev", "test", "notebook", "orchestrator"]
+[tool.dagster]
+module = "dasgter"
 
 [tool.hatch.envs.prod]
-features = ["orchestrator"]
+features = ["server", "nicegui", "orchestrator"]
+
+[tool.hatch.envs.web]
+path = ".venv_web"
+features = ["dev", "test", "nicegui"]
 
 [tool.hatch.envs.test]
 path = ".venv_test"
@@ -65,19 +94,19 @@ extra-dependencies = [
   "mypy>=1.0.0",
 ]
 [tool.hatch.envs.types.scripts]
-check = "mypy --install-types --non-interactive {args:src/dagster_databox_poc tests}"
+check = "mypy --install-types --non-interactive {args:src/data_collector_unit_poc tests}"
 
 [tool.coverage.run]
-source_pkgs = ["dagster_databox_poc", "tests"]
+source_pkgs = ["data_collector_unit_poc", "tests"]
 branch = true
 parallel = true
 omit = [
-  "src/dagster_databox_poc/__about__.py",
+  "src/data_collector_unit_poc/__about__.py",
 ]
 
 [tool.coverage.paths]
-dagster_databox = ["src/dagster_databox_poc", "*/dagster-databox/src/dagster_databox_poc"]
-tests = ["tests", "*/dagster-databox/tests"]
+dagster_databox = ["src/data_collector_unit_poc", "*/data-collector-unit-poc/src/data_collector_unit_poc"]
+tests = ["tests", "*/data-collector-unit-poc/tests"]
 
 [tool.coverage.report]
 exclude_lines = [
