@@ -1,0 +1,18 @@
+run_coordinator:
+  module: dagster.core.run_coordinator
+  class: QueuedRunCoordinator
+  config:
+    max_concurrent_runs: 4
+
+# python_logs:
+#   managed_python_loggers:
+
+nux:
+  enabled: false
+
+telemetry:
+  enabled: false
+
+run_monitoring:
+  enabled: true
+  free_slots_after_run_end_seconds: 300
