@@ -1,19 +1,23 @@
-# Dagster DataBox
+# Data Collector Unit - PoC
 
 -----
 
-A small python app that handles both data collection and usage scenarios in a single container.
+A python app that handles both data collection and usage scenarios in a single container.
+
 
 ## Table of Contents
 
 - [Installation](#installation)
 - [License](#license)
 
+## Architecture
+
+- dagster for data pipeline
+- sqLite as a data storage/data warehouse
+
 ## Installation
 
-```console
-pip install dagster-databox
-```
+
 
 ## Development
 
@@ -38,6 +42,18 @@ pip install dagster-databox
     dagster dev -h 0.0.0.0 -p 3000 -w ./src/data_collector_unit_poc/dagster/workspace.yaml
 
     ```
+
+- create new migration:
+
+  ```cli
+  alembic revision --autogenerate -m "<new migration name>"
+  ```
+
+- apply the last migration
+
+  ```cli
+  cd src/data_collector_unit_poc/migrations && alembic upgrade head
+  ```
 
 
 ## License

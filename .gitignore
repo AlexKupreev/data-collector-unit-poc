@@ -6,6 +6,16 @@ __pycache__/
 # C extensions
 *.so
 
+# dumps
+**/hn_news.json
+**/lr_news.json
+**/summarizer_eval_subset.json
+**/summarizer_ground_truth.json
+
+# sqlite database
+*.db
+*.db.lock
+
 # Distribution / packaging
 .Python
 build/
