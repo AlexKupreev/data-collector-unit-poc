@@ -1,12 +1,13 @@
 import json
 import sys
-from data_collector_unit_poc.data_storage import PostRepository
+from data_collector_unit_poc.data_storage import PostRepository, Source
 
 def import_data_from_file(file_path):
     with open(file_path, 'r') as file:
         data = json.load(file)
         repository = PostRepository()
         for post_data in data:
+            post_data['source'] = Source(post_data['source'])
             repository.add_post(post_data)
     print("Data imported successfully from", file_path)
 

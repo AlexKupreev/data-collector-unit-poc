@@ -1,9 +1,14 @@
-from sqlalchemy import create_engine, Column, String, Integer, JSON, DateTime
+from sqlalchemy import create_engine, Column, String, Integer, JSON, DateTime, Enum as SqlEnum
 from sqlalchemy.orm import sessionmaker, DeclarativeBase, Mapped, mapped_column
+from enum import Enum
 import datetime
 
 class Base(DeclarativeBase):
     pass
+
+class Source(Enum):
+    HACKER_NEWS = "Hacker News"
+    LOBSTERS = "Lobsters"
 
 class Post(Base):
     __tablename__ = 'posts'
@@ -12,7 +17,7 @@ class Post(Base):
     original_id: Mapped[str] = mapped_column(String, unique=False, nullable=True)
     title: Mapped[str] = mapped_column(String, nullable=False)
     url: Mapped[str] = mapped_column(String, nullable=False)
-    source: Mapped[str] = mapped_column(String, nullable=False)
+    source: Mapped[Source] = mapped_column(SqlEnum(Source), nullable=False)
     score: Mapped[int] = mapped_column(Integer, nullable=True)
     timestamp: Mapped[datetime.datetime] = mapped_column(DateTime, nullable=False)
     content: Mapped[str] = mapped_column(String, nullable=False)
@@ -33,7 +38,7 @@ class PostRepository:
             original_id=post_data['original_id'],
             title=post_data['title'],
             url=post_data['url'],
-            source=post_data['source'],
+            source=Source(post_data['source']),
             score=post_data.get('score'),
             timestamp=datetime.datetime.fromisoformat(post_data['timestamp']),
             content=post_data['content'],
