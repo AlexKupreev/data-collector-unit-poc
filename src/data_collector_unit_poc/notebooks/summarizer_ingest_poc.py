@@ -1,6 +1,5 @@
 import hashlib
 import httpx
-import json
 import time
 from datetime import datetime
 from pathlib import Path
@@ -12,14 +11,11 @@ from tqdm.auto import tqdm
 from bs4 import BeautifulSoup
 from readability import Document
 from data_collector_unit_poc.data_storage import PostRepository, Source
-from src.data_collector_unit_poc.notebooks import embeddings
-from src.data_collector_unit_poc.notebooks import vectordb
+from data_collector_unit_poc.notebooks import embeddings
+from data_collector_unit_poc.notebooks import vectordb
 
 class ContentIsVideoError(Exception):
     pass
-
-hn_dump_file = "hn_news.json"
-lr_dump_file = "lr_news.json"
 
 def generate_document_id(url: str | None, content: str | None) -> str:
     """Generate unique document identifier based on URL or cleaned content"""
@@ -120,32 +116,22 @@ def fetch_lobsters_comments(client, short_id, max_comments=10):
         })
     return comments
 
-def get_stories_to_download(stories: list, source: str) -> list:
+def get_stories_to_download(stories: list, repository: PostRepository, source: str) -> list:
     """Get list of stories for a source that need to be downloaded"""
     stories_to_download = []
     if source == "Hacker News":
         story_ids = [str(story_id) for story_id in stories]
-        try:
-            with open(hn_dump_file, "r") as fp:
-                stored_news = json.load(fp)
-        except (FileNotFoundError, json.JSONDecodeError):
-            stored_news = []
     elif source == "Lobsters":
         story_ids = [str(story["short_id"]) for story in stories]
-        try:
-            with open(lr_dump_file, "r") as fp:
-                stored_news = json.load(fp)
-        except (FileNotFoundError, json.JSONDecodeError):
-            stored_news = []
     else:
         raise ValueError("Unknown source")
-    stored_ids = [news_item["original_id"] for news_item in stored_news]
+    
     for story_id in story_ids:
-        if story_id not in stored_ids:
+        if not repository.get_post_by_id(story_id):
             stories_to_download.append(story_id)
     return stories_to_download
 
-def fetch_hacker_news(scope: str, count: int = 10, max_comments: int = 10, truncate_words: int = 1000) -> list[dict]:
+def fetch_hacker_news(scope: str, repository: PostRepository, count: int = 10, max_comments: int = 10, truncate_words: int = 1000) -> list[dict]:
     with httpx.Client() as client:
         if scope == "hottest":
             url = "https://hacker-news.firebaseio.com/v0/topstories.json"
@@ -155,7 +141,7 @@ def fetch_hacker_news(scope: str, count: int = 10, max_comments: int = 10, trunc
             raise ValueError(f"Unknown scope: {scope}")
         response = client.get(url)
         stories = response.json()[:count]
-        stories_to_download = get_stories_to_download(stories, source="Hacker News")
+        stories_to_download = get_stories_to_download(stories, repository=repository, source="Hacker News")
         news_items = []
         for story_id in stories_to_download:
             story_url = f"https://hacker-news.firebaseio.com/v0/item/{story_id}.json"
@@ -176,7 +162,7 @@ def fetch_hacker_news(scope: str, count: int = 10, max_comments: int = 10, trunc
                 if not content:
                     content = story_data.get("title")
             comments = fetch_hn_comments(client, story_id, max_comments)
-            news_items.append({
+            news_item = {
                 "original_id": story_id,
                 "title": story_data["title"],
                 "url": item_url,
@@ -187,10 +173,13 @@ def fetch_hacker_news(scope: str, count: int = 10, max_comments: int = 10, trunc
                 "comments": comments,
                 "description": meta_description,
                 "document_uid": generate_document_id(item_url, content),
-            })
+                "ingest_utctime": int(time.time())
+            }
+            repository.add_post(news_item)
+            news_items.append(news_item)
         return news_items
 
-def fetch_lobsters_news(scope: str, count: int = 10, max_comments: int = 10, truncate_words: int = 1000) -> list[dict]:
+def fetch_lobsters_news(scope: str, repository: PostRepository, count: int = 10, max_comments: int = 10, truncate_words: int = 1000) -> list[dict]:
     with httpx.Client() as client:
         if scope == "hottest":
             url = "https://lobste.rs/hottest.json"
@@ -200,7 +189,7 @@ def fetch_lobsters_news(scope: str, count: int = 10, max_comments: int = 10, tru
             raise ValueError(f"Unknown scope: {scope}")
         response = client.get(url)
         stories = response.json()[:count]
-        stories_to_download = get_stories_to_download(stories, source="Lobsters")
+        stories_to_download = get_stories_to_download(stories, repository=repository, source="Lobsters")
         news_items = []
         for story in stories:
             if str(story["short_id"]) not in stories_to_download:
@@ -223,7 +212,7 @@ def fetch_lobsters_news(scope: str, count: int = 10, max_comments: int = 10, tru
                     print(f"Error fetching content for {story['url']}: {str(exc)}, fallback to Wayback Machine.")
             if not content:
                 content = story["title"]
-            news_items.append({
+            news_item = {
                 "original_id": story["short_id"],
                 "title": story["title"],
                 "url": story["url"],
@@ -234,53 +223,31 @@ def fetch_lobsters_news(scope: str, count: int = 10, max_comments: int = 10, tru
                 "comments": comments,
                 "description": meta_description,
                 "document_uid": generate_document_id(story["url"], content),
-            })
+                "ingest_utctime": int(time.time())
+            }
+            repository.add_post(news_item)
+            news_items.append(news_item)
         return news_items
-
-def load_stored(file_path: str) -> list:
-    """Load stored dumps"""
-    stored = []
-    try:
-        with open(file_path, "r") as fp:
-            stored = json.load(fp)
-    except (FileNotFoundError, json.JSONDecodeError):
-        pass
-    return stored
-
-def append_news(news: list[dict], dump_file: str) -> int:
-    """Append news to the dumped news in a file"""
-    stored = load_stored(dump_file)
-    if isinstance(stored, list):
-        stored.extend(news)
-    else:
-        stored = news[:]
-    with open(dump_file, "w") as fp:
-        for doc in stored:
-            if "ingest_utctime" not in doc:
-                doc["ingest_utctime"] = int(time.time())
-        json.dump(stored, fp, indent=2)
-    return len(stored)
 
 def main():
     load_dotenv(Path() / "../.env", verbose=True)
     INIT_CHUNK_SIZE = 100
     ONGOING_CHUNK_SIZE = 20
-    stored_hn = load_stored(hn_dump_file)
-    stored_lr = load_stored(lr_dump_file)
-    is_first_run = not (stored_hn and stored_lr)
+    repository = PostRepository()
+    is_first_run = not repository.get_post_by_id("1")  # Assuming "1" is a valid ID to check for first run
     hn_news = fetch_hacker_news(
         scope="newest",
-        count=INIT_CHUNK_SIZE if not stored_hn else ONGOING_CHUNK_SIZE
+        count=INIT_CHUNK_SIZE if is_first_run else ONGOING_CHUNK_SIZE,
+        repository=repository
     )
     print(f"Number of downloaded HN news: {len(hn_news)}")
-    append_news(hn_news, hn_dump_file)
     lr_news = fetch_lobsters_news(
         scope="newest",
-        count=INIT_CHUNK_SIZE if not stored_lr else ONGOING_CHUNK_SIZE
+        count=INIT_CHUNK_SIZE if is_first_run else ONGOING_CHUNK_SIZE,
+        repository=repository
     )
     print(f"Number of downloaded LR news: {len(lr_news)}")
-    append_news(lr_news, lr_dump_file)
-    documents = stored_hn + stored_lr if is_first_run else hn_news + lr_news
+    documents = hn_news + lr_news
     embedding_dim = embeddings.get_dimensions()
     operations = []
     for doc in tqdm(documents, desc="Creating embeddings"):
@@ -311,13 +278,9 @@ def main():
     ]
     milvus_client.insert(collection_name=collection_name, data=operations)
     milvus_client.close()
-    stored_hn = load_stored(hn_dump_file)
-    stored_lr = load_stored(lr_dump_file)
     completed_at = time.time()
     time_spent = (completed_at - started_at)
     print(f"Completed at {datetime.now()}, execution took ~{int(time_spent / 60)} min")
-    print(f"Number of stored HN entries: {len(stored_hn)}")
-    print(f"Number of stored Lobste.rs entries: {len(stored_lr)}")
 
 if __name__ == "__main__":
     started_at = time.time()
