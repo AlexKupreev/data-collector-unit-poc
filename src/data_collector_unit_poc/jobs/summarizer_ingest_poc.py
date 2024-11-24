@@ -11,8 +11,8 @@ from tqdm.auto import tqdm
 from bs4 import BeautifulSoup
 from readability import Document
 from data_collector_unit_poc.data_storage import PostRepository, Source
-from data_collector_unit_poc.notebooks import embeddings
-from data_collector_unit_poc.notebooks import vectordb
+from data_collector_unit_poc.core import embeddings
+from data_collector_unit_poc.core import vectordb
 
 class ContentIsVideoError(Exception):
     pass
@@ -30,7 +30,7 @@ def generate_document_id(url: str | None, content: str | None) -> str:
     truncated = cleaned_url[:MAX_CHARS]
     hash_object = hashlib.sha1(truncated.encode())
     hash_hex = hash_object.hexdigest()
-    document_id = hash_hex[:10]
+    document_id = hash_hex[:13]
     return document_id
 
 def fetch_url_content(client, url, truncate_words: int = 500) -> str:
@@ -278,10 +278,12 @@ def main():
     ]
     milvus_client.insert(collection_name=collection_name, data=operations)
     milvus_client.close()
-    completed_at = time.time()
-    time_spent = (completed_at - started_at)
-    print(f"Completed at {datetime.now()}, execution took ~{int(time_spent / 60)} min")
+
 
 if __name__ == "__main__":
     started_at = time.time()
     main()
+    completed_at = time.time()
+    time_spent = (completed_at - started_at)
+    print(f"Completed at {datetime.now()}, execution took ~{int(time_spent / 60)} min")
+

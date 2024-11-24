@@ -4,7 +4,7 @@ from datetime import datetime
 
 from pymilvus import CollectionSchema, DataType, FieldSchema, MilvusClient
 
-from embeddings import get_embeddings
+from data_collector_unit_poc.core.embeddings import get_embeddings
 
 class MilvusClientFix:
     """A wrapper for Milvus to deal with local issues."""

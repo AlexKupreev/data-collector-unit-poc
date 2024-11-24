@@ -1,16 +1,17 @@
-from sqlalchemy import create_engine, Column, String, Integer, JSON, DateTime, Enum as SqlEnum
-from sqlalchemy.orm import sessionmaker, DeclarativeBase, Mapped, mapped_column
-from enum import Enum
 import datetime
+from enum import Enum
 
-class Base(DeclarativeBase):
-    pass
+from sqlalchemy import Column, String, Integer, JSON, DateTime, Enum as SqlEnum
+from sqlalchemy.orm import sessionmaker, Mapped, mapped_column
+
+from data_collector_unit_poc.core import db
+
 
 class Source(Enum):
     HACKER_NEWS = "Hacker News"
     LOBSTERS = "Lobsters"
 
-class Post(Base):
+class Post(db.Base):
     __tablename__ = 'posts'
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
@@ -27,10 +28,8 @@ class Post(Base):
     ingest_utctime: Mapped[int] = mapped_column(Integer, nullable=False)
 
 class PostRepository:
-    def __init__(self, db_url='sqlite:///posts.db'):
-        self.engine = create_engine(db_url)
-        Base.metadata.create_all(self.engine)
-        self.Session = sessionmaker(bind=self.engine)
+    def __init__(self, db_engine=db.db_engine):
+        self.Session = sessionmaker(bind=db_engine)
 
     def add_post(self, post_data):
         session = self.Session()
