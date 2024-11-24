@@ -49,6 +49,9 @@ orchestrator = [
   "dagster-webserver",
   "dagster-duckdb",
 ]
+nicegui = [
+  "nicegui"
+]
 
 [project.urls]
 Documentation = "https://github.com/AlexKupreev/data-collector-unit-poc#readme"
@@ -68,7 +71,7 @@ python = "3.11"
 installer = "uv"
 type = "virtual"
 path = ".venv"
-features = ["dev", "test", "notebook", "orchestrator"]
+features = ["dev", "test", "notebook", "nicegui"]
 [tool.hatch.envs.default.scripts]
 jobs = "dagster dev -h 0.0.0.0 -p 3000"
 
@@ -77,6 +80,10 @@ module = "dasgter"
 
 [tool.hatch.envs.prod]
 features = ["orchestrator"]
+
+[tool.hatch.envs.web]
+path = ".venv_web"
+features = ["dev", "test", "nicegui"]
 
 [tool.hatch.envs.test]
 path = ".venv_test"
