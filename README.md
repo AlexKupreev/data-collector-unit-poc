@@ -55,6 +55,11 @@ A python app that handles both data collection and usage scenarios in a single c
   cd src/data_collector_unit_poc/migrations && alembic upgrade head
   ```
 
+- run fastapi server in dev mode:
+
+  ```commandline
+  fastapi dev src/data_collector_unit_poc/web/main.py
+  ```
 
 ## License
 

@@ -52,6 +52,11 @@ orchestrator = [
 nicegui = [
   "nicegui"
 ]
+server = [
+  "fastapi[standard]",
+  "fastapi-cors",
+  "uvicorn"
+]
 
 [project.urls]
 Documentation = "https://github.com/AlexKupreev/data-collector-unit-poc#readme"
@@ -71,7 +76,7 @@ python = "3.11"
 installer = "uv"
 type = "virtual"
 path = ".venv"
-features = ["dev", "test", "notebook", "nicegui"]
+features = ["dev", "test", "notebook", "server", "nicegui", ]
 [tool.hatch.envs.default.scripts]
 jobs = "dagster dev -h 0.0.0.0 -p 3000"
 
@@ -79,7 +84,7 @@ jobs = "dagster dev -h 0.0.0.0 -p 3000"
 module = "dasgter"
 
 [tool.hatch.envs.prod]
-features = ["orchestrator"]
+features = ["server"]
 
 [tool.hatch.envs.web]
 path = ".venv_web"
