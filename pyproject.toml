@@ -87,7 +87,7 @@ jobs = "dagster dev -h 0.0.0.0 -p 3000"
 module = "dasgter"
 
 [tool.hatch.envs.prod]
-features = ["server"]
+features = ["server", "nicegui"]
 
 [tool.hatch.envs.web]
 path = ".venv_web"
