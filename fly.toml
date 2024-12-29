@@ -1,7 +1,8 @@
-app = "data-collector-unit-poc"
+app = "data-collector-unit-poc-1234"
 
 [build]
-  image = "Dockerfile"
+  dockerfile = "Dockerfile"
+  ignorefile = ".dockerignore"
 
 [env]
   PORT = "8000"

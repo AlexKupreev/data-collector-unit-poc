@@ -27,6 +27,13 @@ class Post(db.Base):
     document_uid: Mapped[str] = mapped_column(String, nullable=False)
     ingest_utctime: Mapped[int] = mapped_column(Integer, nullable=False)
 
+
+# class User(db.Base):
+#     __tablename__ = "users"
+
+#     id = Column(Integer, primary_key=True)
+#     name = Column(String)
+
 class PostRepository:
     def __init__(self, db_engine=db.db_engine):
         self.Session = sessionmaker(bind=db_engine)

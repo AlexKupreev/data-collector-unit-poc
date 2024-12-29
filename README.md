@@ -61,6 +61,32 @@ A python app that handles both data collection and usage scenarios in a single c
   fastapi dev src/data_collector_unit_poc/web/main.py
   ```
 
+- create app in fly.io (needed for deployment to fly.io):
+
+  ```commandline
+  flyctl apps create data-collector-unit-poc
+  ```
+
+- set environment variables:
+
+  ```commandline
+  fly secrets set APP_SECRET=...
+  ```
+
+- deploy to fly.io:
+
+  ```commandline
+  fly deploy
+  ```
+
+  To deploy on a single machine use flag `--ha=false`.
+
+- scale to 1 machine after deploy:
+
+  ```commandline
+  flyctl scale count 1
+  ```
+
 ## License
 
 `data-collector-unit-poc` is distributed under the terms of the [MIT](https://spdx.org/licenses/MIT.html) license.

@@ -12,19 +12,24 @@ WORKDIR /app
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
     build-essential \
+    pipx \
     && apt-get clean
 
-# Install Hatch
-RUN pip install hatch
+RUN pipx ensurepath && pipx install uv && pipx install hatch
+
+ENV PATH="${PATH}:/root/.local/bin"
+
+# Verify both commands work:
+RUN hatch --version && uv --version
 
 # Copy the project files
 COPY . /app
 
 # Install Python dependencies using Hatch
-RUN hatch env create
+RUN hatch env create prod
 
 # Expose the port the app runs on
 EXPOSE 8000
 
 # Run the application
-CMD ["hatch", "run", "uvicorn", "src.data_collector_unit_poc.web.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["hatch", "run", "prod:uvicorn", "src.data_collector_unit_poc.web.main:app", "--host", "0.0.0.0", "--port", "8000"]

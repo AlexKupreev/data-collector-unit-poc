@@ -9,5 +9,5 @@ db_url = f"sqlite:///{os.path.join(os.path.dirname(__file__), '..', 'migrations'
 class Base(DeclarativeBase):
     pass
 
-db_engine = create_engine(db_url)
+db_engine = create_engine(db_url, connect_args={"check_same_thread": False})
 # Base.metadata.create_all(db_engine)
