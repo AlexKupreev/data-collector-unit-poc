@@ -46,9 +46,7 @@ notebook = [
   "tqdm>=4.66.5",
 ]
 orchestrator = [
-  "dagster",
-  "dagster-webserver",
-  "dagster-duckdb",
+  "apscheduler",
 ]
 nicegui = [
   "nicegui"
@@ -79,7 +77,7 @@ python = "3.11"
 installer = "uv"
 type = "virtual"
 path = ".venv"
-features = ["dev", "test", "notebook", "server", "nicegui", ]
+features = ["dev", "test", "notebook", "server", "nicegui", "orchestrator"]
 [tool.hatch.envs.default.scripts]
 jobs = "dagster dev -h 0.0.0.0 -p 3000"
 
@@ -87,7 +85,7 @@ jobs = "dagster dev -h 0.0.0.0 -p 3000"
 module = "dasgter"
 
 [tool.hatch.envs.prod]
-features = ["server", "nicegui"]
+features = ["server", "nicegui", "orchestrator"]
 
 [tool.hatch.envs.web]
 path = ".venv_web"
