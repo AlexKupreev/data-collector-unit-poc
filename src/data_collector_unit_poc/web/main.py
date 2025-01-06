@@ -6,10 +6,12 @@ from sqladmin import Admin, ModelView
 
 from data_collector_unit_poc.core.db import db_engine
 from data_collector_unit_poc.data_storage import Post
-from data_collector_unit_poc.web import frontend, scheduler
+from data_collector_unit_poc.web import frontend, scheduler, storage
 
 
 app = FastAPI(lifespan=scheduler.lifespan)
+storage.init(app)
+
 admin = Admin(app, db_engine)
 
 # CORS settings

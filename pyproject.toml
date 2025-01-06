@@ -56,7 +56,8 @@ server = [
   "fastapi-cors",
   "fastapi-users[sqlalchemy]",
   "uvicorn",
-  "sqladmin[full]"
+  "sqladmin[full]",
+  "boto3"
 ]
 
 [project.urls]

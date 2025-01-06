@@ -21,30 +21,6 @@ passwords = {admin_user: admin_pass}
 
 unrestricted_page_routes = {'/login'}
 
-class LazyLoaded(list):
-    def __init__(self, *args, **kwargs):
-        self.pagination = kwargs.pop('pagination', 1)
-        super().__init__(*args, **kwargs)
-        self()
-    def __call__(self):
-        for _ in range(self.pagination):
-            self.append({"number": random.random()})
-    @property
-    def len(self):
-        return len(self)
-
-class PaginationChange:
-    def __init__(self):
-        self.maxpage = {}
-    def __call__(self, e, data):
-        prev = self.maxpage.get(str(e.sender), 0)
-        curr = e.value['page']
-        if curr > prev:
-            data()
-        e.sender.update()
-        self.maxpage[str(e.sender)] = max(curr, self.maxpage.get(str(e.sender), 0))
-
-
 def init(fastapi_app: FastAPI) -> None:
     
     repository = PostRepository()

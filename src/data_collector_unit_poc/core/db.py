@@ -3,8 +3,14 @@ import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase
 
-# Construct the absolute path to the database file
-db_url = f"sqlite:///{os.path.join(os.path.dirname(__file__), '..', 'migrations', 'posts.db')}"
+# Determine the environment
+environment = os.getenv("ENVIRONMENT", "production")
+
+# Set the database path based on the environment
+if environment == "production":
+    db_url = "sqlite:////data/posts.db"
+else:
+    db_url = f"sqlite:///{os.path.join(os.path.dirname(__file__), '..', 'migrations', 'posts.db')}"
 
 class Base(DeclarativeBase):
     pass

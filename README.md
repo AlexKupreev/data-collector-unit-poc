@@ -73,6 +73,12 @@ A python app that handles both data collection and usage scenarios in a single c
   fly secrets set APP_SECRET=...
   fly secrets set ADMIN_USERNAME=...
   fly secrets set ADMIN_PASSWORD=...
+  optionally:
+  fly secrets set AWS_ACCESS_KEY_ID=...
+  fly secrets set AWS_ENDPOINT_URL_S3=...
+  fly secrets set AWS_REGION=auto
+  fly secrets set AWS_SECRET_ACCESS_KEY=...
+  fly secrets set BUCKET_NAME=...
   ```
 
 - deploy to fly.io:
@@ -87,6 +93,12 @@ A python app that handles both data collection and usage scenarios in a single c
 
   ```commandline
   flyctl scale count 1
+  ```
+
+- create 1 persistent volume (1 GB by default)
+  
+  ```commandline
+  fly volumes create data_collector_unit_poc_volume -n 1 -r <region code>
   ```
 
 ## License
