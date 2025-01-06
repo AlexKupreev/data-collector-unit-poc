@@ -62,6 +62,19 @@ class PostRepository:
         post = session.query(Post).filter_by(original_id=original_id).first()
         session.close()
         return post
+    
+    def count_all_posts(self) -> int:
+        session = self.Session()
+        number = session.query(Post).count()
+        session.close()
+        return number
+    
+    def get_paginated_posts(self, page: int = 1, page_size: int = 10):
+        session = self.Session()
+        offset = (page - 1) * page_size
+        posts = session.query(Post).offset(offset).limit(page_size).all()
+        session.close()
+        return posts
 
     def delete_post(self, original_id):
         session = self.Session()

@@ -6,7 +6,10 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.responses import RedirectResponse
 from nicegui import app, ui
+from nicegui.events import GenericEventArguments
 from starlette.middleware.base import BaseHTTPMiddleware
+
+from data_collector_unit_poc.data_storage import PostRepository
 
 
 load_dotenv()
@@ -18,8 +21,33 @@ passwords = {admin_user: admin_pass}
 
 unrestricted_page_routes = {'/login'}
 
+class LazyLoaded(list):
+    def __init__(self, *args, **kwargs):
+        self.pagination = kwargs.pop('pagination', 1)
+        super().__init__(*args, **kwargs)
+        self()
+    def __call__(self):
+        for _ in range(self.pagination):
+            self.append({"number": random.random()})
+    @property
+    def len(self):
+        return len(self)
+
+class PaginationChange:
+    def __init__(self):
+        self.maxpage = {}
+    def __call__(self, e, data):
+        prev = self.maxpage.get(str(e.sender), 0)
+        curr = e.value['page']
+        if curr > prev:
+            data()
+        e.sender.update()
+        self.maxpage[str(e.sender)] = max(curr, self.maxpage.get(str(e.sender), 0))
+
 
 def init(fastapi_app: FastAPI) -> None:
+    
+    repository = PostRepository()
     
     class AuthMiddleware(BaseHTTPMiddleware):
         """This middleware restricts access to all NiceGUI pages.
@@ -73,6 +101,53 @@ def init(fastapi_app: FastAPI) -> None:
             password = ui.input('Password', password=True, password_toggle_button=True).on('keydown.enter', try_login)
             ui.button('Log in', on_click=try_login)
         return None
+    
+    @ui.page("/posts")
+    def posts() -> None:
+        """Posts table"""
+        
+        columns = [
+            {'name': 'title', 'label': 'Title', 'field': 'title'},
+            {'name': 'link', 'label': 'URL', 'field': 'link'},
+            {'name': 'timestamp', 'label': 'Timestamp', 'field': 'timestamp'},
+        ]
+        pagination = {'rowsPerPage': 10, 'rowsNumber': repository.count_all_posts(), 'page': 1}
+
+        def get_rows():
+            page = pagination['page']
+            rpp = pagination['rowsPerPage']
+            
+            paged = repository.get_paginated_posts(page=page, page_size=rpp)
+            
+            return [{
+                'title': post.title, 
+                'link': post.url, 
+                "timestamp": str(post.timestamp)
+            } for post in paged]
+
+        def on_request(e: GenericEventArguments) -> None:
+            nonlocal pagination
+            pagination = e.args['pagination']
+            table.props('loading')
+            rows = get_rows()
+            table.pagination.update(pagination)
+            table.props(remove='loading')
+            table.update_rows(rows)
+
+        table = ui.table(columns=columns, rows=get_rows(), row_key='name', pagination=pagination)
+        table.add_slot('body', r'''
+            <q-tr :props="props">
+                <q-td v-for="col in props.cols" :key="col.name" :props="props">
+                    <div v-if="col.name === 'link'" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 40ch;">
+                        <a :href="col.value" target="_blank">{{ col.value }}</a>
+                    </div>
+                    <div v-else style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 70ch;">
+                        {{ col.value }}
+                    </div>
+                </q-td>
+            </q-tr>
+        ''')
+        table.on('request', on_request)
 
 
     ui.run_with(
