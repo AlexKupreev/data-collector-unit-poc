@@ -102,44 +102,51 @@ def download_noaa_isd_for_year(location: NoaaIsdLocation, year: int) -> pd.DataF
         with httpx.Client() as client:
             url = f"https://www.ncei.noaa.gov/pub/data/noaa/isd-lite/{year}/{location.usaf}-{location.wban}-{year}.gz"
             
-            response = client.get(url)
+            print(f"getting data from URL {url}...")
+            response = client.get(url, timeout=40)
             response.raise_for_status()  # Ensure we raise an error for bad responses
 
             # Define column specifications based on the fixed-width format
             colspecs = [
                 (0, 4),    # Year
                 (5, 7),    # Month
-                (8, 11),    # Day
-                (11, 13),   # Hour
-                (13, 19),  # Air Temperature
-                (19, 24),  # Dew Point Temperature
-                (25, 31),  # Sea Level Pressure
-                (31, 37),  # Wind Direction
-                (37, 43),  # Wind Speed Rate
-                (43, 49),  # Sky Condition
-                (49, 55),  # Precipitation Depth 1 hour
-                (55, 61),  # Precipitation Depth 6 hours
+                (8, 10),   # Day
+                (11, 13),  # Hour
+                (14, 19),  # Air Temperature
+                (20, 25),  # Dew Point Temperature
+                (26, 31),  # Sea Level Pressure
+                (32, 37),  # Wind Direction
+                (38, 43),  # Wind Speed Rate
+                (44, 49),  # Sky Condition
+                (50, 55),  # Precipitation Depth 1 hour
+                (56, 61),  # Precipitation Depth 6 hours
             ]
 
             # Decompress the gzipped content
             with gzip.open(BytesIO(response.content), 'rt') as gz_file:
-                df = pd.read_fwf(gz_file, colspecs=colspecs, header=None, na_values=-9999)
+                df = pd.read_fwf(
+                    gz_file,
+                    colspecs=colspecs,
+                    header=None,
+                    na_values=-9999,
+                    dtype="Int64"
+                )
                 
             df.columns = columns
 
     except httpx.HTTPStatusError as ex:
-        print(f"ERROR: {ex!s}")
+        print(f"HTTP status ERROR: {ex!s} (location: {location}, year: {year})")
         df = pd.DataFrame(columns=columns)
         
     except Exception as ex:
-        print(f"ERROR: {ex!s}")
+        print(f"ERROR: {ex!s} (location: {location}, year: {year})")
         df = pd.DataFrame(columns=columns)
         # sleep a bit to let the connection reset if needed
         time.sleep(10)
         
     return df
 
-def store_location_weather_data(location: NoaaIsdLocation):
+def store_location_weather_data(location: NoaaIsdLocation, cancel_event=None):
     """Store location NOAA ISD data.
     
     If no file exists, go throught the full history and merge it.
@@ -154,13 +161,17 @@ def store_location_weather_data(location: NoaaIsdLocation):
         os.makedirs(filedir, exist_ok=True)
         
         for year in range(location.begin.year, location.end.year + 1):
+            if cancel_event and cancel_event.is_set():
+                print("Job cancellation requested, stopping...")
+                return
+            print("started processing:", location, year)
             chunks.append(download_noaa_isd_for_year(location, year))
-            print(location, year)
+            print("completed processing:", location, year)
         
     else:
         # take only the current year + the previous if no more than 10 days passed
         
-        stored = pd.read_csv(filepath, compression="infer")
+        stored = pd.read_csv(filepath, compression="infer", dtype="Int64")
         chunks.append(stored)
         
         current_date = pd.Timestamp.now()
@@ -172,33 +183,46 @@ def store_location_weather_data(location: NoaaIsdLocation):
         years.append(current_date.year)
         
         for year in years:
+            if cancel_event and cancel_event.is_set():
+                print("Job cancellation requested, stopping...")
+                return
+            print("started processing:", location, year)
             chunks.append(download_noaa_isd_for_year(location, year))
-            print(location, year)
+            print("completed processing:", location, year)
     
-    full = pd.concat([x for x in chunks if not x.empty])
-    
-    # we need to overwrite old values, so remove duplicates preserving last ones
-    full.drop_duplicates(subset=["year", "month", "day", "hour"], keep="last")
-    
-    full.to_csv(filepath, index=False, compression="infer")
-    
-    # and push to s3
-    # if environment != "local":
-    BUCKET_NAME = os.getenv("BUCKET_NAME")
-    s3_client = boto3.client('s3')
-    
-    backup_name = os.path.basename(filepath)
-    backup_path = f"{s3_noaa_isd_path}/{backup_name}"
-    print(f"upload file {filepath} to backup_path {backup_path}")
-    s3_client.upload_file(filepath, BUCKET_NAME, backup_path)
+    filled_chunks = [x for x in chunks if not x.empty]
+    if filled_chunks:
+        full = pd.concat(filled_chunks)
+        
+        # we need to overwrite old values, so remove duplicates preserving last ones
+        full.drop_duplicates(subset=["year", "month", "day", "hour"], keep="last")
+        
+        full.to_csv(filepath, index=False, compression="infer")
+        
+        # and push to s3
+        # if environment != "local":
+        BUCKET_NAME = os.getenv("BUCKET_NAME")
+        s3_client = boto3.client('s3')
+        
+        backup_name = os.path.basename(filepath)
+        backup_path = f"{s3_noaa_isd_path}/{backup_name}"
+        print(f"upload file {filepath} to backup_path {backup_path}")
+        s3_client.upload_file(filepath, BUCKET_NAME, backup_path)
+    else:
+        print(f"No data found for location: {location}")
 
 
-def ingest_noaa_isd_lite_job():
+def ingest_noaa_isd_lite_job(cancel_event=None):
     """Ingest NOAA ISD data"""
     scope = get_noaa_isd_locations()
     for location in scope:
+        # Check if cancellation was requested
+        if cancel_event and cancel_event.is_set():
+            print("Job cancellation requested, stopping...")
+            return
+            
         print(f"store data for location: {location}")
-        store_location_weather_data(location)
+        store_location_weather_data(location, cancel_event)
         time.sleep(5)
 
 

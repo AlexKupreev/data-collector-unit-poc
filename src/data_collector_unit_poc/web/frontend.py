@@ -9,7 +9,13 @@ from nicegui import app, ui
 from nicegui.events import GenericEventArguments
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from data_collector_unit_poc.web.scheduler import build_now_trigger, ingest_noaa_isd_lite_job, scheduler
+from data_collector_unit_poc.web.scheduler import (
+    build_now_trigger, 
+    wrapped_ingest_noaa_isd_lite_job, 
+    scheduler,
+    get_running_jobs,
+    terminate_job
+)
 
 
 load_dotenv()
@@ -44,11 +50,69 @@ def init(fastapi_app: FastAPI) -> None:
             app.storage.user.clear()
             ui.navigate.to('/login')
 
-        with ui.grid(columns=2):
-            ui.button('Ingest NOAA ISD', on_click=lambda: (scheduler.add_job(ingest_noaa_isd_lite_job, build_now_trigger()), ui.notify('Ingest NOAA ISD job triggered successfully!'))).props('outline round')
-            
+        with ui.header(elevated=True).classes('items-center justify-between'):
             ui.label(f'Hello {app.storage.user["username"]}!').classes('text-2xl')
-            ui.button(on_click=logout, icon='logout').props('outline round')
+            with ui.row():
+                ui.button('Jobs Management', on_click=lambda: ui.navigate.to('/jobs')).props('outline round')
+                ui.button(on_click=logout, icon='logout').props('outline round')
+
+        ui.button('Ingest NOAA ISD', on_click=lambda: (
+            scheduler.add_job(wrapped_ingest_noaa_isd_lite_job, build_now_trigger()), 
+            ui.notify('Ingest NOAA ISD job triggered successfully!')
+        )).props('outline round')
+
+    @ui.page('/jobs')
+    def jobs_page() -> None:
+        def handle_terminate(job_id: str) -> None:
+            if terminate_job(job_id):
+                ui.notify('Job terminated successfully')
+                refresh_jobs_table(jobs_container)
+            else:
+                ui.notify('Failed to terminate job', color='negative')
+
+        with ui.header(elevated=True).classes('items-center justify-between'):
+            ui.label('Jobs Management').classes('text-2xl')
+            ui.button('Back to Home', on_click=lambda: ui.navigate.to('/')).props('outline round')
+
+        # Create jobs grid
+        jobs_container = ui.element('div').classes('w-full')
+
+        def refresh_jobs_table(container):
+            # Clear existing content
+            container.clear()
+            
+            # Add header row
+            with container:
+                with ui.row().classes('w-full bg-blue-100 p-2'):
+                    ui.label('Job ID').classes('flex-1')
+                    ui.label('Name').classes('flex-1')
+                    ui.label('Next Run Time').classes('flex-1')
+                    ui.label('Trigger').classes('flex-1')
+                    ui.label('Status').classes('flex-1')
+                    ui.label('Actions').classes('flex-1')
+            
+            # Add job rows
+            jobs = get_running_jobs()
+            for job in jobs:
+                with container:
+                    with ui.row().classes('w-full p-2 border-b'):
+                        ui.label(job['id']).classes('flex-1')
+                        ui.label(job['name']).classes('flex-1')
+                        ui.label(job['next_run_time'] if job['next_run_time'] else '-').classes('flex-1')
+                        ui.label(job['trigger']).classes('flex-1')
+                        ui.label(job['status']).classes('flex-1')
+                        with ui.element('div').classes('flex-1'):
+                            ui.button('Terminate', on_click=lambda _, job_id=job['id']: handle_terminate(job_id)) \
+                                .props('outline round color=red')
+
+        # Initial population
+        refresh_jobs_table(jobs_container)
+
+        # Add refresh button
+        ui.button(
+            'Refresh Jobs List', 
+            on_click=lambda: refresh_jobs_table(jobs_container)
+        ).props('outline round').classes('mt-4')
 
     @ui.page('/login')
     def login() -> Optional[RedirectResponse]:
