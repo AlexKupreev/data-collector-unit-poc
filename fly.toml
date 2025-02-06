@@ -3,6 +3,9 @@ app = ""
 [mounts]
   source = "data_collector_unit_poc_volume"
   destination = "/data"
+  auto_extend_size_threshold = 90
+  auto_extend_size_increment = "1GB"
+  auto_extend_size_limit = "5GB"
 
 [build]
   dockerfile = "Dockerfile"

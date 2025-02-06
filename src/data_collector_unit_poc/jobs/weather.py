@@ -171,24 +171,29 @@ def store_location_weather_data(location: NoaaIsdLocation, cancel_event=None):
     else:
         # take only the current year + the previous if no more than 10 days passed
         
-        stored = pd.read_csv(filepath, compression="infer", dtype="Int64")
-        chunks.append(stored)
-        
-        current_date = pd.Timestamp.now()
-        last_year_end = current_date.replace(year=current_date.year - 1, month=12, day=31)
-        years = []
-        if current_date - pd.Timedelta(days=10) < last_year_end:
-            years.append(current_date.year - 1)
+        try:
+            stored = pd.read_csv(filepath, compression="infer", dtype="Int64")
+            chunks.append(stored)
             
-        years.append(current_date.year)
+            current_date = pd.Timestamp.now()
+            last_year_end = current_date.replace(year=current_date.year - 1, month=12, day=31)
+            years = []
+            if current_date - pd.Timedelta(days=10) < last_year_end:
+                years.append(current_date.year - 1)
+                
+            years.append(current_date.year)
+            
+            for year in years:
+                if cancel_event and cancel_event.is_set():
+                    print("Job cancellation requested, stopping...")
+                    return
+                print("started processing:", location, year)
+                chunks.append(download_noaa_isd_for_year(location, year))
+                print("completed processing:", location, year)
         
-        for year in years:
-            if cancel_event and cancel_event.is_set():
-                print("Job cancellation requested, stopping...")
-                return
-            print("started processing:", location, year)
-            chunks.append(download_noaa_isd_for_year(location, year))
-            print("completed processing:", location, year)
+        except EOFError as exc:
+            print(f"Error during decompression of file {filepath}: {exc!s}. Delete stored file to recreate later...")
+            os.unlink(filepath)
     
     filled_chunks = [x for x in chunks if not x.empty]
     if filled_chunks:
@@ -215,13 +220,16 @@ def store_location_weather_data(location: NoaaIsdLocation, cancel_event=None):
 def ingest_noaa_isd_lite_job(cancel_event=None):
     """Ingest NOAA ISD data"""
     scope = get_noaa_isd_locations()
+    total_locations = len(scope)
+    curr_loc_num = 0
     for location in scope:
         # Check if cancellation was requested
         if cancel_event and cancel_event.is_set():
             print("Job cancellation requested, stopping...")
             return
             
-        print(f"store data for location: {location}")
+        curr_loc_num += 1
+        print(f"store data for location {curr_loc_num}/{total_locations}: {location}")
         store_location_weather_data(location, cancel_event)
         time.sleep(5)
 
