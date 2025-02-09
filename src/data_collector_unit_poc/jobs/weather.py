@@ -5,13 +5,20 @@ import time
 from datetime import date, datetime
 from io import BytesIO, StringIO
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Union
+from uuid import uuid4
 
 import boto3
 import httpx
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
+import pyorc
+from deltalake import DeltaTable, write_deltalake
+from hudi import HudiTable
+from pyiceberg.catalog import load_catalog
+from pyiceberg.schema import Schema
+from pyiceberg.types import IntegerType, LongType, NestedField
 from dotenv import load_dotenv
 
 from data_collector_unit_poc.settings import (
@@ -63,7 +70,7 @@ def get_noaa_isd_locations() -> list[NoaaIsdLocation]:
     if environment == "local":
         num_locations = 10
     else:
-        num_locations = 200
+        num_locations = 100
         
     chosen = df_locations_icao_actual.iloc[:num_locations,:]
     locations = []
@@ -85,27 +92,135 @@ def get_noaa_isd_locations() -> list[NoaaIsdLocation]:
     return locations
 
 
+StorageFormat = Literal["csv", "parquet", "avro", "orc", "delta", "hudi", "iceberg"]
+
 def build_local_noaa_isd_storage_path(
     location: NoaaIsdLocation,
-    format: str = "csv"
-    # format: Literal["csv", "parquet", "avro"] = "csv" # type error
+    format: StorageFormat = "csv"
 ) -> str:
     """Build local storage path for location NOAA ISD weather in specified format"""
     extensions = {
         "csv": "csv.gz",
         "parquet": "parquet",
-        "avro": "avro"
+        "avro": "avro",
+        "orc": "orc",
+        "delta": "delta",  # Delta Lake uses a directory
+        "hudi": "hudi",    # Hudi uses a directory
+        "iceberg": "iceberg"  # Iceberg uses a directory
     }
     return os.path.join(
         noaa_isd_local_persistent_path,
         f"{location.usaf}-{location.wban}.{extensions[format]}"
     )
 
+def store_data_orc(df: pd.DataFrame, filepath: str):
+    """Store DataFrame in ORC format"""
+    schema = "struct<year:bigint,month:bigint,day:bigint,hour:bigint,air_temp:bigint,dew_point_temp:bigint,sea_level_pressure:bigint,wind_direction:bigint,wind_speed_rate:bigint,sky_condition:bigint,precipitation_depth_1h:bigint,precipitation_depth_6h:bigint>"
+    
+    with open(filepath, 'wb') as f:
+        with pyorc.Writer(f, schema) as writer:
+            for _, row in df.iterrows():
+                writer.write(tuple(row))
+                
+def store_data_orc_pandas(df: pd.DataFrame, filepath: str):
+    """Store DataFrame in ORC format using pandas"""
+    # TODO check if de-indexing works
+    df.loc[:,:].reset_index().to_orc(filepath, index=False)
+
+def read_data_orc(filepath: str) -> pd.DataFrame:
+    """Read ORC file into DataFrame"""
+    with open(filepath, 'rb') as f:
+        reader = pyorc.Reader(f)
+        data = [row for row in reader]
+    return pd.DataFrame(data)
+
+def read_data_orc_pandas(filepath: str) -> pd.DataFrame:
+    """Read ORC file into DataFrame using pandas"""
+    return pd.read_orc(filepath)
+
+def store_data_delta(df: pd.DataFrame, filepath: str):
+    """Store DataFrame in Delta Lake format"""
+    write_deltalake(filepath, df, mode="overwrite")
+
+def read_data_delta(filepath: str) -> pd.DataFrame:
+    """Read Delta Lake table into DataFrame"""
+    dt = DeltaTable(filepath)
+    return dt.to_pandas()
+
+def store_data_hudi(df: pd.DataFrame, filepath: str):
+    """Store DataFrame in Apache Hudi format"""
+    # Convert to parquet first since Hudi Python API is limited
+    parquet_path = f"{filepath}/data.parquet"
+    hudi_dirname = os.path.dirname(parquet_path)
+    os.makedirs(hudi_dirname, exist_ok=True)
+    store_data_parquet(df, parquet_path)
+    
+    # Use Hudi's file-based indexing
+    os.makedirs(f"{filepath}/.hoodie", exist_ok=True)
+    with open(f"{filepath}/.hoodie/hoodie.properties", "w") as f:
+        f.write(f"""
+hoodie.table.name=weather_{uuid4().hex[:8]}
+hoodie.datasource.write.recordkey.field=year,month,day,hour
+hoodie.datasource.write.precombine.field=year
+""")
+
+def read_data_hudi(filepath: str) -> pd.DataFrame:
+    """Read Hudi table into DataFrame"""
+    # Read the parquet file directly since we're using file-based indexing
+    return pd.read_parquet(f"{filepath}/data.parquet")
+
+def store_data_iceberg(df: pd.DataFrame, filepath: str):
+    """Store DataFrame in Apache Iceberg format"""
+    # Define schema
+    schema = Schema(
+        NestedField(1, "year", IntegerType(), required=True),
+        NestedField(2, "month", IntegerType(), required=True),
+        NestedField(3, "day", IntegerType(), required=True),
+        NestedField(4, "hour", IntegerType(), required=True),
+        NestedField(5, "air_temp", IntegerType(), required=False),
+        NestedField(6, "dew_point_temp", IntegerType(), required=False),
+        NestedField(7, "sea_level_pressure", IntegerType(), required=False),
+        NestedField(8, "wind_direction", IntegerType(), required=False),
+        NestedField(9, "wind_speed_rate", IntegerType(), required=False),
+        NestedField(10, "sky_condition", IntegerType(), required=False),
+        NestedField(11, "precipitation_depth_1h", IntegerType(), required=False),
+        NestedField(12, "precipitation_depth_6h", IntegerType(), required=False)
+    )
+    
+    # Create catalog
+    catalog = load_catalog(
+        "local",
+        uri='thrift://localhost:9083/'
+        # warehouse_path=os.path.dirname(filepath),
+        # catalog_impl="hive"
+    )
+    
+    # Create table
+    table_name = f"weather_{uuid4().hex[:8]}"
+    catalog.create_table(
+        identifier=table_name,
+        schema=schema,
+        location=filepath
+    )
+    
+    # Write data
+    table = catalog.load_table(table_name)
+    table.append(df)
+
+def read_data_iceberg(filepath: str) -> pd.DataFrame:
+    """Read Iceberg table into DataFrame"""
+    catalog = load_catalog(
+        "local",
+        warehouse_path=os.path.dirname(filepath),
+        catalog_impl="hive"
+    )
+    table = catalog.load_table(os.path.basename(filepath))
+    return table.scan().to_pandas()
+
 def store_data_parquet(df: pd.DataFrame, filepath: str):
     """Store DataFrame in Parquet format"""
     table = pa.Table.from_pandas(df)
     pq.write_table(table, filepath)
-
 
 def read_data_parquet(filepath: str) -> pd.DataFrame:
     """Read Parquet file into DataFrame"""
@@ -169,25 +284,31 @@ def download_noaa_isd_for_year(location: NoaaIsdLocation, year: int) -> pd.DataF
     return df
 
 def store_location_weather_data(location: NoaaIsdLocation, cancel_event=None):
-    """Store location NOAA ISD data in multiple formats (CSV, Parquet, Avro).
+    """Store location NOAA ISD data in multiple formats.
     
     If no file exists, go through the full history and merge it.
     If the file exists, get data only for the current year
     (and previous if it's still the beginning of a year).
-    Data is stored in three formats:
+    Data is stored in multiple formats:
     - CSV (gzipped)
     - Parquet
     - Avro
+    - ORC
+    - Delta Lake
+    - Apache Hudi
+    - Apache Iceberg
     """
+    # ignore catalog types for now : delta, hudi, iceberg
+    formats: list[StorageFormat] = ["csv", "parquet", "avro", "orc"]
     filepaths = {
         format: build_local_noaa_isd_storage_path(location, format)
-        for format in ["csv", "parquet", "avro"]
+        for format in formats
     }
     chunks = []
     # Check if any format file exists
-    # if not any(os.path.isfile(fp) for fp in filepaths.values()):
-    # for now rewrite all files
-    if True:
+    if not any(os.path.isfile(fp) for fp in filepaths.values()):
+    # # for now rewrite all files
+    # if True:
         # see for the start year, get and merge all years' data
         for filepath in filepaths.values():
             filedir = os.path.dirname(filepath)
@@ -211,8 +332,16 @@ def store_location_weather_data(location: NoaaIsdLocation, cancel_event=None):
                         stored = pd.read_csv(filepath, compression="infer", dtype="Int64")
                     elif format == "parquet":
                         stored = read_data_parquet(filepath)
-                    else:  # avro
+                    elif format == "avro":
                         stored = pd.read_parquet(filepath)  # temporarily use parquet for avro
+                    elif format == "orc":
+                        stored = read_data_orc_pandas(filepath)
+                    elif format == "delta":
+                        stored = read_data_delta(filepath)
+                    elif format == "hudi":
+                        stored = read_data_hudi(filepath)
+                    else:  # iceberg
+                        stored = read_data_iceberg(filepath)
                     break
             chunks.append(stored)
             
@@ -250,18 +379,26 @@ def store_location_weather_data(location: NoaaIsdLocation, cancel_event=None):
                 full.to_csv(filepath, index=False, compression="infer")
             elif format == "parquet":
                 store_data_parquet(full, filepath)
-            else:  # avro
+            elif format == "avro":
                 store_data_parquet(full, filepath)  # temporarily use parquet for avro
+            elif format == "orc":
+                store_data_orc_pandas(full, filepath)
+            elif format == "delta":
+                store_data_delta(full, filepath)
+            elif format == "hudi":
+                store_data_hudi(full, filepath)
+            else:  # iceberg
+                store_data_iceberg(full, filepath)
             
             # and push to s3
             # if environment != "local":
-            BUCKET_NAME = os.getenv("BUCKET_NAME")
-            s3_client = boto3.client('s3')
+            # BUCKET_NAME = os.getenv("BUCKET_NAME")
+            # s3_client = boto3.client('s3')
             
-            backup_name = os.path.basename(filepath)
-            backup_path = f"{s3_noaa_isd_path}/{backup_name}"
-            print(f"upload file {filepath} to backup_path {backup_path}")
-            s3_client.upload_file(filepath, BUCKET_NAME, backup_path)
+            # backup_name = os.path.basename(filepath)
+            # backup_path = f"{s3_noaa_isd_path}/{backup_name}"
+            # print(f"upload file {filepath} to backup_path {backup_path}")
+            # s3_client.upload_file(filepath, BUCKET_NAME, backup_path)
     else:
         print(f"No data found for location: {location}")
 

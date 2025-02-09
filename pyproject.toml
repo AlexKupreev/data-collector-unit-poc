@@ -31,7 +31,11 @@ dependencies = [
   "aiosqlite",
   "pyarrow>=14.0.1",
   "fastparquet>=2024.2.0",
-  "avro-python3>=1.10.2"
+  "avro-python3>=1.10.2",
+  "deltalake>=0.24.0",
+  "hudi>=0.3.0",
+  "pyiceberg[pyarrow,pandas,snappy]",
+  "pyorc>=0.5.0"
 ]
 
 [project.optional-dependencies]
