@@ -28,7 +28,10 @@ dependencies = [
   "more-itertools>=10.5.0",
   "SQLAlchemy>2.0.0",
   "alembic",
-  "aiosqlite"
+  "aiosqlite",
+  "pyarrow>=14.0.1",
+  "fastparquet>=2024.2.0",
+  "avro-python3>=1.10.2"
 ]
 
 [project.optional-dependencies]

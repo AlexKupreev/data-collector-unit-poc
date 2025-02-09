@@ -5,10 +5,13 @@ import time
 from datetime import date, datetime
 from io import BytesIO, StringIO
 from pathlib import Path
+from typing import Literal
 
 import boto3
 import httpx
 import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
 from dotenv import load_dotenv
 
 from data_collector_unit_poc.settings import (
@@ -60,7 +63,7 @@ def get_noaa_isd_locations() -> list[NoaaIsdLocation]:
     if environment == "local":
         num_locations = 10
     else:
-        num_locations = 1000
+        num_locations = 200
         
     chosen = df_locations_icao_actual.iloc[:num_locations,:]
     locations = []
@@ -82,16 +85,35 @@ def get_noaa_isd_locations() -> list[NoaaIsdLocation]:
     return locations
 
 
-def build_local_noaa_isd_storage_path(location: NoaaIsdLocation) -> str:
-    """Build local storage path for location NOAA ISD weather"""
+def build_local_noaa_isd_storage_path(
+    location: NoaaIsdLocation,
+    format: str = "csv"
+    # format: Literal["csv", "parquet", "avro"] = "csv" # type error
+) -> str:
+    """Build local storage path for location NOAA ISD weather in specified format"""
+    extensions = {
+        "csv": "csv.gz",
+        "parquet": "parquet",
+        "avro": "avro"
+    }
     return os.path.join(
         noaa_isd_local_persistent_path,
-        f"{location.usaf}-{location.wban}.csv.gz"
+        f"{location.usaf}-{location.wban}.{extensions[format]}"
     )
+
+def store_data_parquet(df: pd.DataFrame, filepath: str):
+    """Store DataFrame in Parquet format"""
+    table = pa.Table.from_pandas(df)
+    pq.write_table(table, filepath)
+
+
+def read_data_parquet(filepath: str) -> pd.DataFrame:
+    """Read Parquet file into DataFrame"""
+    return pd.read_parquet(filepath)
 
 
 def download_noaa_isd_for_year(location: NoaaIsdLocation, year: int) -> pd.DataFrame:
-    """Loadd data for NOAA ISD location for a year"""
+    """Load data for NOAA ISD location for a year"""
     columns = [
         "year", "month", "day", "hour", "air_temp", "dew_point_temp",
         "sea_level_pressure", "wind_direction", "wind_speed_rate",
@@ -147,18 +169,29 @@ def download_noaa_isd_for_year(location: NoaaIsdLocation, year: int) -> pd.DataF
     return df
 
 def store_location_weather_data(location: NoaaIsdLocation, cancel_event=None):
-    """Store location NOAA ISD data.
+    """Store location NOAA ISD data in multiple formats (CSV, Parquet, Avro).
     
-    If no file exists, go throught the full history and merge it.
+    If no file exists, go through the full history and merge it.
     If the file exists, get data only for the current year
     (and previous if it's still the beginning of a year).
+    Data is stored in three formats:
+    - CSV (gzipped)
+    - Parquet
+    - Avro
     """
-    filepath = build_local_noaa_isd_storage_path(location)
+    filepaths = {
+        format: build_local_noaa_isd_storage_path(location, format)
+        for format in ["csv", "parquet", "avro"]
+    }
     chunks = []
-    if not os.path.isfile(filepath):
+    # Check if any format file exists
+    # if not any(os.path.isfile(fp) for fp in filepaths.values()):
+    # for now rewrite all files
+    if True:
         # see for the start year, get and merge all years' data
-        filedir = os.path.dirname(filepath)
-        os.makedirs(filedir, exist_ok=True)
+        for filepath in filepaths.values():
+            filedir = os.path.dirname(filepath)
+            os.makedirs(filedir, exist_ok=True)
         
         for year in range(location.begin.year, location.end.year + 1):
             if cancel_event and cancel_event.is_set():
@@ -170,9 +203,17 @@ def store_location_weather_data(location: NoaaIsdLocation, cancel_event=None):
         
     else:
         # take only the current year + the previous if no more than 10 days passed
-        
         try:
-            stored = pd.read_csv(filepath, compression="infer", dtype="Int64")
+            # Try to read from any existing format, preferring CSV
+            for format, filepath in filepaths.items():
+                if os.path.isfile(filepath):
+                    if format == "csv":
+                        stored = pd.read_csv(filepath, compression="infer", dtype="Int64")
+                    elif format == "parquet":
+                        stored = read_data_parquet(filepath)
+                    else:  # avro
+                        stored = pd.read_parquet(filepath)  # temporarily use parquet for avro
+                    break
             chunks.append(stored)
             
             current_date = pd.Timestamp.now()
@@ -202,17 +243,25 @@ def store_location_weather_data(location: NoaaIsdLocation, cancel_event=None):
         # we need to overwrite old values, so remove duplicates preserving last ones
         full.drop_duplicates(subset=["year", "month", "day", "hour"], keep="last")
         
-        full.to_csv(filepath, index=False, compression="infer")
-        
-        # and push to s3
-        # if environment != "local":
-        BUCKET_NAME = os.getenv("BUCKET_NAME")
-        s3_client = boto3.client('s3')
-        
-        backup_name = os.path.basename(filepath)
-        backup_path = f"{s3_noaa_isd_path}/{backup_name}"
-        print(f"upload file {filepath} to backup_path {backup_path}")
-        s3_client.upload_file(filepath, BUCKET_NAME, backup_path)
+        # Store in all formats
+        for format, filepath in filepaths.items():
+            print(f"Storing data in {format} format...")
+            if format == "csv":
+                full.to_csv(filepath, index=False, compression="infer")
+            elif format == "parquet":
+                store_data_parquet(full, filepath)
+            else:  # avro
+                store_data_parquet(full, filepath)  # temporarily use parquet for avro
+            
+            # and push to s3
+            # if environment != "local":
+            BUCKET_NAME = os.getenv("BUCKET_NAME")
+            s3_client = boto3.client('s3')
+            
+            backup_name = os.path.basename(filepath)
+            backup_path = f"{s3_noaa_isd_path}/{backup_name}"
+            print(f"upload file {filepath} to backup_path {backup_path}")
+            s3_client.upload_file(filepath, BUCKET_NAME, backup_path)
     else:
         print(f"No data found for location: {location}")
 
