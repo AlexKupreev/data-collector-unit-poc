@@ -1,6 +1,8 @@
 """NiceGUI frontend"""
 import os
 from typing import Optional
+import pandas as pd
+import plotly.express as px
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
@@ -16,6 +18,14 @@ from data_collector_unit_poc.web.scheduler import (
     get_running_jobs,
     terminate_job
 )
+from data_collector_unit_poc.jobs.weather import (
+    get_noaa_isd_locations,
+    build_local_noaa_isd_storage_path,
+    read_data_parquet,
+    read_data_orc_pandas,
+)
+from data_collector_unit_poc.settings import noaa_isd_local_persistent_path
+import os
 
 
 load_dotenv()
@@ -54,6 +64,7 @@ def init(fastapi_app: FastAPI) -> None:
             ui.label(f'Hello {app.storage.user["username"]}!').classes('text-2xl')
             with ui.row():
                 ui.button('Jobs Management', on_click=lambda: ui.navigate.to('/jobs')).props('outline round')
+                ui.button('Weather Locations', on_click=lambda: ui.navigate.to('/weather-locations')).props('outline round')
                 ui.button(on_click=logout, icon='logout').props('outline round')
 
         ui.button('Ingest NOAA ISD', on_click=lambda: (
@@ -130,6 +141,138 @@ def init(fastapi_app: FastAPI) -> None:
             password = ui.input('Password', password=True, password_toggle_button=True).on('keydown.enter', try_login)
             ui.button('Log in', on_click=try_login)
         return None
+
+    def read_location_data(location) -> pd.DataFrame | None:
+        """Read weather data for a location from any available format"""
+        base_filename = f"{location.usaf}-{location.wban}"
+        
+        # Try reading from different formats
+        for format in ['parquet', 'orc', 'csv.gz']:
+            filepath = os.path.join(noaa_isd_local_persistent_path, f"{base_filename}.{format}")
+            if os.path.exists(filepath):
+                try:
+                    if format == 'parquet':
+                        return read_data_parquet(filepath)
+                    elif format == 'orc':
+                        return read_data_orc_pandas(filepath)
+                    else:  # csv.gz
+                        return pd.read_csv(filepath, compression='gzip')
+                except Exception as e:
+                    print(f"Error reading {format} file: {e}")
+                    continue
+        return None
+
+    def create_temperature_chart(df: pd.DataFrame, location_name: str):
+        """Create a temperature timeline chart"""
+        # Convert temperature to Celsius (data is stored in tenths of degrees Celsius)
+        df['temperature'] = df['air_temp'] / 10.0
+        
+        # Create datetime column
+        df['datetime'] = pd.to_datetime(df[['year', 'month', 'day', 'hour']])
+        
+        # Calculate daily mean temperature
+        daily_temp = df.groupby(df['datetime'].dt.date)['temperature'].mean().reset_index()
+        
+        # Create the chart
+        fig = px.line(
+            daily_temp, 
+            x='datetime', 
+            y='temperature',
+            title=f'Mean Daily Temperature for {location_name}',
+            labels={'temperature': 'Temperature (°C)', 'datetime': 'Date'}
+        )
+        return fig
+
+    @ui.page('/weather-locations')
+    def weather_locations_page() -> None:
+        with ui.header(elevated=True).classes('items-center justify-between'):
+            ui.label('Weather Locations').classes('text-2xl')
+            ui.button('Back to Home', on_click=lambda: ui.navigate.to('/')).props('outline round')
+
+        # Get locations and check which ones have data files
+        locations = get_noaa_isd_locations()
+        
+        # Create locations grid
+        locations_container = ui.element('div').classes('w-full')
+        
+        with locations_container:
+            # Add header row
+            with ui.row().classes('w-full bg-blue-100 p-2'):
+                ui.label('Station').classes('flex-1')
+                ui.label('ICAO').classes('flex-1')
+                ui.label('Location').classes('flex-1')
+                ui.label('Coordinates').classes('flex-1')
+                ui.label('Elevation').classes('flex-1')
+                ui.label('Period').classes('flex-1')
+                ui.label('Data Available').classes('flex-1')
+            
+            # Add location rows
+            for location in locations:
+                # Check if any data file exists for this location
+                base_filename = f"{location.usaf}-{location.wban}"
+                has_data = any(
+                    os.path.exists(os.path.join(noaa_isd_local_persistent_path, f"{base_filename}.{ext}"))
+                    for ext in ['csv.gz', 'parquet', 'avro', 'orc']
+                )
+                
+                with ui.row().classes('w-full p-2 border-b items-center'):
+                    ui.label(location.station_name or '-').classes('flex-1')
+                    ui.label(location.icao or '-').classes('flex-1')
+                    ui.label(f"{location.country or '-'} {location.us_state or ''}".strip()).classes('flex-1')
+                    ui.label(f"({location.lat}, {location.lon})").classes('flex-1')
+                    ui.label(f"{location.elevation}m" if location.elevation else '-').classes('flex-1')
+                    ui.label(f"{location.begin} - {location.end}").classes('flex-1')
+                    with ui.element('div').classes('flex-1'):
+                        if has_data:
+                            ui.button('Show Chart', on_click=lambda loc=location: show_temperature_chart(loc)) \
+                                .props('outline round color=blue')
+                        else:
+                            ui.label('✗')
+
+        # Create a dialog for the chart
+        chart_dialog = ui.dialog()
+        chart_container = None
+
+        def show_temperature_chart(location):
+            nonlocal chart_container
+            
+            with chart_dialog:
+                chart_dialog.clear()
+                
+                # Add header with close button
+                with ui.row().classes('w-full justify-between items-center'):
+                    ui.label(f'Temperature Timeline: {location.station_name}').classes('text-xl')
+                    ui.button('Close', on_click=chart_dialog.close).props('outline round')
+                
+                # Add loading indicator
+                with ui.row().classes('w-full justify-center'):
+                    ui.spinner('dots')
+                    ui.label('Loading data...')
+                
+                # Show the dialog while loading
+                chart_dialog.open()
+                
+                # Load and process the data
+                df = read_location_data(location)
+                if df is not None and not df.empty:
+                    # Clear loading indicator
+                    chart_dialog.clear()
+                    
+                    # Recreate header
+                    with ui.row().classes('w-full justify-between items-center'):
+                        ui.label(f'Temperature Timeline: {location.station_name}').classes('text-xl')
+                        ui.button('Close', on_click=chart_dialog.close).props('outline round')
+                    
+                    # Create and display the chart
+                    fig = create_temperature_chart(df, location.station_name or str(location.usaf))
+                    ui.plotly(fig).classes('w-full h-[500px]')
+                else:
+                    # Clear loading indicator and show error
+                    chart_dialog.clear()
+                    with ui.row().classes('w-full justify-between items-center'):
+                        ui.label('Error').classes('text-xl text-red-500')
+                        ui.button('Close', on_click=chart_dialog.close).props('outline round')
+                    ui.label('Failed to load temperature data').classes('text-red-500')
 
     ui.run_with(
         fastapi_app,
