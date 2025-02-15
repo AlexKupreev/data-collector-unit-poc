@@ -304,8 +304,10 @@ def store_location_weather_data(location: NoaaIsdLocation, cancel_event=None):
         format: build_local_noaa_isd_storage_path(location, format)
         for format in formats
     }
+    BUCKET_NAME = os.getenv("BUCKET_NAME")
+    
     chunks = []
-    # Check if any format file exists
+    # # Check if any format file exists
     if not any(os.path.isfile(fp) for fp in filepaths.values()):
     # # for now rewrite all files
     # if True:
@@ -391,14 +393,13 @@ def store_location_weather_data(location: NoaaIsdLocation, cancel_event=None):
                 store_data_iceberg(full, filepath)
             
             # and push to s3
-            # if environment != "local":
-            # BUCKET_NAME = os.getenv("BUCKET_NAME")
-            # s3_client = boto3.client('s3')
-            
-            # backup_name = os.path.basename(filepath)
-            # backup_path = f"{s3_noaa_isd_path}/{backup_name}"
-            # print(f"upload file {filepath} to backup_path {backup_path}")
-            # s3_client.upload_file(filepath, BUCKET_NAME, backup_path)
+            if environment == "production" and BUCKET_NAME:
+                s3_client = boto3.client('s3')
+                
+                backup_name = os.path.basename(filepath)
+                backup_path = f"{s3_noaa_isd_path}/{backup_name}"
+                print(f"upload file {filepath} to backup_path {backup_path}")
+                s3_client.upload_file(filepath, BUCKET_NAME, backup_path)
     else:
         print(f"No data found for location: {location}")
 
