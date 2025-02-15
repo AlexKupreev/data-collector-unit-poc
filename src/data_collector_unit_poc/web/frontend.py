@@ -1,8 +1,11 @@
 """NiceGUI frontend"""
 import os
-from typing import Optional
+from typing import Optional, Dict
 import pandas as pd
 import plotly.express as px
+import time
+import glob
+from collections import defaultdict
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
@@ -65,6 +68,7 @@ def init(fastapi_app: FastAPI) -> None:
             with ui.row():
                 ui.button('Jobs Management', on_click=lambda: ui.navigate.to('/jobs')).props('outline round')
                 ui.button('Weather Locations', on_click=lambda: ui.navigate.to('/weather-locations')).props('outline round')
+                ui.button('Benchmarks', on_click=lambda: ui.navigate.to('/benchmarks')).props('outline round')
                 ui.button(on_click=logout, icon='logout').props('outline round')
 
         ui.button('Ingest NOAA ISD', on_click=lambda: (
@@ -273,6 +277,116 @@ def init(fastapi_app: FastAPI) -> None:
                         ui.label('Error').classes('text-xl text-red-500')
                         ui.button('Close', on_click=chart_dialog.close).props('outline round')
                     ui.label('Failed to load temperature data').classes('text-red-500')
+
+    def run_format_benchmark() -> Dict[str, Dict[str, float]]:
+        """Run benchmark for different data formats"""
+        formats = {
+            'parquet': ('*.parquet', read_data_parquet),
+            'orc': ('*.orc', read_data_orc_pandas),
+            'csv.gz': ('*.csv.gz', lambda f: pd.read_csv(f, compression='gzip'))
+        }
+        
+        results = {}
+        
+        for format_name, (pattern, reader_func) in formats.items():
+            # Find all files of this format
+            files = glob.glob(os.path.join(noaa_isd_local_persistent_path, pattern))
+            if not files:
+                continue
+                
+            format_times = []
+            total_start = time.time()
+            
+            for file in files:
+                try:
+                    # Time reading each file
+                    start = time.time()
+                    df = reader_func(file)
+                    end = time.time()
+                    
+                    # Immediately delete dataframe to free memory
+                    del df
+                    
+                    format_times.append(end - start)
+                except Exception as e:
+                    print(f"Error reading {file}: {e}")
+                    
+            total_end = time.time()
+            
+            if format_times:
+                results[format_name] = {
+                    'total_time': total_end - total_start,
+                    'mean_time': sum(format_times) / len(format_times),
+                    'num_files': len(files)
+                }
+        
+        return results
+
+    @ui.page('/benchmarks')
+    def benchmarks_page() -> None:
+        with ui.header(elevated=True).classes('items-center justify-between'):
+            ui.label('Data Format Benchmarks').classes('text-2xl')
+            ui.button('Back to Home', on_click=lambda: ui.navigate.to('/')).props('outline round')
+            
+        results_container = ui.element('div').classes('w-full')
+        
+        def run_benchmark():
+            # Clear previous results
+            results_container.clear()
+            
+            # Add loading indicator
+            with results_container:
+                with ui.row().classes('w-full justify-center my-4'):
+                    ui.spinner('dots')
+                    ui.label('Running benchmark...')
+            
+            # Run benchmark
+            results = run_format_benchmark()
+            
+            # Clear loading indicator
+            results_container.clear()
+            
+            # Display results
+            with results_container:
+                if not results:
+                    ui.label('No data files found to benchmark').classes('text-red-500')
+                    return
+                    
+                # Create results table
+                with ui.element('div').classes('w-full max-w-3xl mx-auto my-4'):
+                    with ui.row().classes('w-full bg-blue-100 p-2'):
+                        ui.label('Format').classes('flex-1')
+                        ui.label('Total Time (s)').classes('flex-1')
+                        ui.label('Mean Time (s)').classes('flex-1')
+                        ui.label('Files Processed').classes('flex-1')
+                    
+                    for format_name, metrics in results.items():
+                        with ui.row().classes('w-full p-2 border-b'):
+                            ui.label(format_name).classes('flex-1')
+                            ui.label(f"{metrics['total_time']:.2f}").classes('flex-1')
+                            ui.label(f"{metrics['mean_time']:.2f}").classes('flex-1')
+                            ui.label(str(metrics['num_files'])).classes('flex-1')
+                
+                # Create bar chart comparing total times
+                fig = px.bar(
+                    x=list(results.keys()),
+                    y=[r['total_time'] for r in results.values()],
+                    labels={'x': 'Format', 'y': 'Total Time (seconds)'},
+                    title='Total Processing Time by Format'
+                )
+                ui.plotly(fig).classes('w-full h-[400px] mt-4')
+                
+                # Create bar chart comparing mean times
+                fig = px.bar(
+                    x=list(results.keys()),
+                    y=[r['mean_time'] for r in results.values()],
+                    labels={'x': 'Format', 'y': 'Mean Time per File (seconds)'},
+                    title='Mean Processing Time by Format'
+                )
+                ui.plotly(fig).classes('w-full h-[400px] mt-4')
+        
+        # Add benchmark trigger button
+        ui.button('Trigger Benchmark', on_click=run_benchmark).props('outline round').classes('my-4')
 
     ui.run_with(
         fastapi_app,
