@@ -1,11 +1,8 @@
 """NiceGUI frontend"""
 import os
-from typing import Optional, Dict
+from typing import Optional
 import pandas as pd
 import plotly.express as px
-import time
-import glob
-from collections import defaultdict
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
@@ -21,14 +18,13 @@ from data_collector_unit_poc.web.scheduler import (
     get_running_jobs,
     terminate_job
 )
+from data_collector_unit_poc.jobs.data_formats import run_format_benchmark
 from data_collector_unit_poc.jobs.weather import (
     get_noaa_isd_locations,
-    build_local_noaa_isd_storage_path,
     read_data_parquet,
     read_data_orc_pandas,
 )
 from data_collector_unit_poc.settings import noaa_isd_local_persistent_path
-import os
 
 
 load_dotenv()
@@ -57,19 +53,23 @@ def init(fastapi_app: FastAPI) -> None:
         
     app.add_middleware(AuthMiddleware)
     
-    @ui.page('/')
-    def main_page() -> None:
+    def add_navigation():
         def logout() -> None:
             app.storage.user.clear()
             ui.navigate.to('/login')
-
-        with ui.header(elevated=True).classes('items-center justify-between'):
+        
+        with ui.row().classes('navigation-bar'):
+            ui.button('Jobs Management', on_click=lambda: ui.navigate.to('/jobs')).props('outline')
+            ui.button('Weather Locations', on_click=lambda: ui.navigate.to('/weather-locations')).props('outline')
+            ui.button('Benchmarks', on_click=lambda: ui.navigate.to('/benchmarks')).props('outline')
+            ui.button(on_click=logout, icon='logout').props('outline')
+    
+    @ui.page('/')
+    def main_page() -> None:
+        with ui.header(elevated=True).classes('items-center justify-between w-full p-4'):
             ui.label(f'Hello {app.storage.user["username"]}!').classes('text-2xl')
-            with ui.row():
-                ui.button('Jobs Management', on_click=lambda: ui.navigate.to('/jobs')).props('outline round')
-                ui.button('Weather Locations', on_click=lambda: ui.navigate.to('/weather-locations')).props('outline round')
-                ui.button('Benchmarks', on_click=lambda: ui.navigate.to('/benchmarks')).props('outline round')
-                ui.button(on_click=logout, icon='logout').props('outline round')
+        
+        add_navigation()
 
         ui.button('Ingest NOAA ISD', on_click=lambda: (
             scheduler.add_job(wrapped_ingest_noaa_isd_lite_job, build_now_trigger()), 
@@ -85,9 +85,12 @@ def init(fastapi_app: FastAPI) -> None:
             else:
                 ui.notify('Failed to terminate job', color='negative')
 
-        with ui.header(elevated=True).classes('items-center justify-between'):
+        with ui.header(elevated=True).classes('items-center justify-between w-full p-4'):
             ui.label('Jobs Management').classes('text-2xl')
-            ui.button('Back to Home', on_click=lambda: ui.navigate.to('/')).props('outline round')
+            with ui.row().classes('gap-2'):
+                ui.button('Back to Home', on_click=lambda: ui.navigate.to('/')).props('outline round')
+
+        add_navigation()
 
         # Create jobs grid
         jobs_container = ui.element('div').classes('w-full')
@@ -189,9 +192,12 @@ def init(fastapi_app: FastAPI) -> None:
 
     @ui.page('/weather-locations')
     def weather_locations_page() -> None:
-        with ui.header(elevated=True).classes('items-center justify-between'):
+        with ui.header(elevated=True).classes('items-center justify-between w-full p-4'):
             ui.label('Weather Locations').classes('text-2xl')
-            ui.button('Back to Home', on_click=lambda: ui.navigate.to('/')).props('outline round')
+            with ui.row().classes('gap-2'):
+                ui.button('Back to Home', on_click=lambda: ui.navigate.to('/')).props('outline round')
+
+        add_navigation()
 
         # Get locations and check which ones have data files
         locations = get_noaa_isd_locations()
@@ -278,56 +284,15 @@ def init(fastapi_app: FastAPI) -> None:
                         ui.button('Close', on_click=chart_dialog.close).props('outline round')
                     ui.label('Failed to load temperature data').classes('text-red-500')
 
-    def run_format_benchmark() -> Dict[str, Dict[str, float]]:
-        """Run benchmark for different data formats"""
-        formats = {
-            'parquet': ('*.parquet', read_data_parquet),
-            'orc': ('*.orc', read_data_orc_pandas),
-            'csv.gz': ('*.csv.gz', lambda f: pd.read_csv(f, compression='gzip'))
-        }
-        
-        results = {}
-        
-        for format_name, (pattern, reader_func) in formats.items():
-            # Find all files of this format
-            files = glob.glob(os.path.join(noaa_isd_local_persistent_path, pattern))
-            if not files:
-                continue
-                
-            format_times = []
-            total_start = time.time()
-            
-            for file in files:
-                try:
-                    # Time reading each file
-                    start = time.time()
-                    df = reader_func(file)
-                    end = time.time()
-                    
-                    # Immediately delete dataframe to free memory
-                    del df
-                    
-                    format_times.append(end - start)
-                except Exception as e:
-                    print(f"Error reading {file}: {e}")
-                    
-            total_end = time.time()
-            
-            if format_times:
-                results[format_name] = {
-                    'total_time': total_end - total_start,
-                    'mean_time': sum(format_times) / len(format_times),
-                    'num_files': len(files)
-                }
-        
-        return results
-
     @ui.page('/benchmarks')
     def benchmarks_page() -> None:
-        with ui.header(elevated=True).classes('items-center justify-between'):
+        with ui.header(elevated=True).classes('items-center justify-between w-full p-4'):
             ui.label('Data Format Benchmarks').classes('text-2xl')
-            ui.button('Back to Home', on_click=lambda: ui.navigate.to('/')).props('outline round')
-            
+            with ui.row().classes('gap-2'):
+                ui.button('Back to Home', on_click=lambda: ui.navigate.to('/')).props('outline round')
+        
+        add_navigation()
+        
         results_container = ui.element('div').classes('w-full')
         
         def run_benchmark():
