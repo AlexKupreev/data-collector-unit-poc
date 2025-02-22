@@ -13,7 +13,8 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from data_collector_unit_poc.web.scheduler import (
     build_now_trigger, 
-    wrapped_ingest_noaa_isd_lite_job, 
+    wrapped_ingest_noaa_isd_lite_job,
+    wrapped_ingest_commodity_data_job,
     scheduler,
     get_running_jobs,
     terminate_job
@@ -61,6 +62,7 @@ def init(fastapi_app: FastAPI) -> None:
         with ui.row().classes('navigation-bar'):
             ui.button('Jobs Management', on_click=lambda: ui.navigate.to('/jobs')).props('outline')
             ui.button('Weather Locations', on_click=lambda: ui.navigate.to('/weather-locations')).props('outline')
+            ui.button('Commodities', on_click=lambda: ui.navigate.to('/commodities')).props('outline')
             ui.button('Benchmarks', on_click=lambda: ui.navigate.to('/benchmarks')).props('outline')
             ui.button(on_click=logout, icon='logout').props('outline')
     
@@ -71,10 +73,16 @@ def init(fastapi_app: FastAPI) -> None:
         
         add_navigation()
 
-        ui.button('Ingest NOAA ISD', on_click=lambda: (
-            scheduler.add_job(wrapped_ingest_noaa_isd_lite_job, build_now_trigger()), 
-            ui.notify('Ingest NOAA ISD job triggered successfully!')
-        )).props('outline round')
+        with ui.row().classes('gap-2'):
+            ui.button('Ingest NOAA ISD', on_click=lambda: (
+                scheduler.add_job(wrapped_ingest_noaa_isd_lite_job, build_now_trigger()), 
+                ui.notify('Ingest NOAA ISD job triggered successfully!')
+            )).props('outline round')
+            
+            ui.button('Ingest Commodities', on_click=lambda: (
+                scheduler.add_job(wrapped_ingest_commodity_data_job, build_now_trigger()),
+                ui.notify('Ingest Commodities job triggered successfully!')
+            )).props('outline round')
 
     @ui.page('/jobs')
     def jobs_page() -> None:
@@ -283,6 +291,110 @@ def init(fastapi_app: FastAPI) -> None:
                         ui.label('Error').classes('text-xl text-red-500')
                         ui.button('Close', on_click=chart_dialog.close).props('outline round')
                     ui.label('Failed to load temperature data').classes('text-red-500')
+
+    def read_commodity_data(symbol: str) -> pd.DataFrame | None:
+        """Read commodity data from parquet file"""
+        filepath = os.path.join('data', 'commodities', f"{symbol.replace('=', '_')}.parquet")
+        if os.path.exists(filepath):
+            try:
+                return pd.read_parquet(filepath)
+            except Exception as e:
+                print(f"Error reading parquet file: {e}")
+        return None
+
+    def create_commodity_chart(df: pd.DataFrame, symbol: str, name: str):
+        """Create a commodity price timeline chart"""
+        # Create the chart
+        fig = px.line(
+            df, 
+            x='date', 
+            y=['open', 'high', 'low', 'close'],
+            title=f'Price History for {name} ({symbol})',
+            labels={'value': 'Price (USD)', 'date': 'Date', 'variable': 'Price Type'}
+        )
+        return fig
+
+    @ui.page('/commodities')
+    def commodities_page() -> None:
+        from data_collector_unit_poc.jobs.commodities import ALL_COMMODITIES
+        
+        with ui.header(elevated=True).classes('items-center justify-between w-full p-4'):
+            ui.label('Commodities').classes('text-2xl')
+            with ui.row().classes('gap-2'):
+                ui.button('Back to Home', on_click=lambda: ui.navigate.to('/')).props('outline round')
+
+        add_navigation()
+
+        # Create commodities grid
+        commodities_container = ui.element('div').classes('w-full')
+        
+        with commodities_container:
+            # Add header row
+            with ui.row().classes('w-full bg-blue-100 p-2'):
+                ui.label('Symbol').classes('flex-1')
+                ui.label('Name').classes('flex-1')
+                ui.label('Exchange').classes('flex-1')
+                ui.label('Unit').classes('flex-1')
+                ui.label('Data Available').classes('flex-1')
+            
+            # Add commodity rows
+            for symbol, name, exchange, unit in ALL_COMMODITIES:
+                # Check if data file exists
+                has_data = os.path.exists(os.path.join('data', 'commodities', f"{symbol.replace('=', '_')}.parquet"))
+                
+                with ui.row().classes('w-full p-2 border-b items-center'):
+                    ui.label(symbol).classes('flex-1')
+                    ui.label(name).classes('flex-1')
+                    ui.label(exchange).classes('flex-1')
+                    ui.label(unit).classes('flex-1')
+                    with ui.element('div').classes('flex-1'):
+                        if has_data:
+                            ui.button('Show Chart', on_click=lambda e, s=symbol, n=name: show_commodity_chart(s, n)) \
+                                .props('outline round color=blue')
+                        else:
+                            ui.label('✗')
+
+        # Create a dialog for the chart
+        chart_dialog = ui.dialog()
+
+        def show_commodity_chart(symbol: str, name: str):
+            with chart_dialog:
+                chart_dialog.clear()
+                
+                # Add header with close button
+                with ui.row().classes('w-full justify-between items-center'):
+                    ui.label(f'Price History: {name}').classes('text-xl')
+                    ui.button('Close', on_click=chart_dialog.close).props('outline round')
+                
+                # Add loading indicator
+                with ui.row().classes('w-full justify-center'):
+                    ui.spinner('dots')
+                    ui.label('Loading data...')
+                
+                # Show the dialog while loading
+                chart_dialog.open()
+                
+                # Load and process the data
+                df = read_commodity_data(symbol)
+                if df is not None and not df.empty:
+                    # Clear loading indicator
+                    chart_dialog.clear()
+                    
+                    # Recreate header
+                    with ui.row().classes('w-full justify-between items-center'):
+                        ui.label(f'Price History: {name}').classes('text-xl')
+                        ui.button('Close', on_click=chart_dialog.close).props('outline round')
+                    
+                    # Create and display the chart
+                    fig = create_commodity_chart(df, symbol, name)
+                    ui.plotly(fig).classes('w-full h-[500px]')
+                else:
+                    # Clear loading indicator and show error
+                    chart_dialog.clear()
+                    with ui.row().classes('w-full justify-between items-center'):
+                        ui.label('Error').classes('text-xl text-red-500')
+                        ui.button('Close', on_click=chart_dialog.close).props('outline round')
+                    ui.label('Failed to load commodity data').classes('text-red-500')
 
     @ui.page('/benchmarks')
     def benchmarks_page() -> None:

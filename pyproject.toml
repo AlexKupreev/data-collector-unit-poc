@@ -20,6 +20,8 @@ classifiers = [
   "Programming Language :: Python :: 3.12"
 ]
 dependencies = [
+  "yfinance>=0.2.36",
+  "pandas-datareader>=0.10.0",  # For additional market data sources
   "numpy>=2.1.0",
   "pandas>=2.2.2",
   "scikit-learn>=1.5.1",

@@ -1,0 +1,9 @@
+# Rules for LLM-aided coding
+
+## Project overview
+
+Please consider system architecture shortly described in docs/architecture.md file.
+
+## Script execution
+
+Execute python scripts via hatch, add "hatch run" prefix to python scripts like: `hatch run python -v`.

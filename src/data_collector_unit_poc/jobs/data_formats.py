@@ -12,7 +12,7 @@ from data_collector_unit_poc.jobs.weather import (
 )
 from data_collector_unit_poc.settings import noaa_isd_local_persistent_path
 
-NUM_FILES_TO_BENCHMARK = 100
+NUM_FILES_TO_BENCHMARK = 10
 
 def run_format_benchmark() -> dict[str, dict[str, float]]:
     """Run benchmark for different data formats"""
