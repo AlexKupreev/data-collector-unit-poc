@@ -1,8 +1,10 @@
 """NiceGUI frontend"""
 import os
 from typing import Optional
+import numpy as np
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
@@ -14,7 +16,8 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from data_collector_unit_poc.web.scheduler import (
     build_now_trigger, 
     wrapped_ingest_noaa_isd_lite_job,
-    wrapped_ingest_commodity_data_job,
+    wrapped_ingest_commodity_daily_data_job,
+    wrapped_ingest_commodity_initial_data_job,
     scheduler,
     get_running_jobs,
     terminate_job
@@ -63,6 +66,7 @@ def init(fastapi_app: FastAPI) -> None:
             ui.button('Jobs Management', on_click=lambda: ui.navigate.to('/jobs')).props('outline')
             ui.button('Weather Locations', on_click=lambda: ui.navigate.to('/weather-locations')).props('outline')
             ui.button('Commodities', on_click=lambda: ui.navigate.to('/commodities')).props('outline')
+            ui.button('Strategy Testing', on_click=lambda: ui.navigate.to('/strategy')).props('outline')
             ui.button('Benchmarks', on_click=lambda: ui.navigate.to('/benchmarks')).props('outline')
             ui.button(on_click=logout, icon='logout').props('outline')
     
@@ -79,10 +83,16 @@ def init(fastapi_app: FastAPI) -> None:
                 ui.notify('Ingest NOAA ISD job triggered successfully!')
             )).props('outline round')
             
-            ui.button('Ingest Commodities', on_click=lambda: (
-                scheduler.add_job(wrapped_ingest_commodity_data_job, build_now_trigger()),
-                ui.notify('Ingest Commodities job triggered successfully!')
-            )).props('outline round')
+            with ui.column().classes('gap-2'):
+                ui.button('Ingest Daily Commodities', on_click=lambda: (
+                    scheduler.add_job(wrapped_ingest_commodity_daily_data_job, build_now_trigger()),
+                    ui.notify('Daily commodities ingestion job triggered successfully!')
+                )).props('outline round')
+                
+                ui.button('Ingest Full History', on_click=lambda: (
+                    scheduler.add_job(wrapped_ingest_commodity_initial_data_job, build_now_trigger()),
+                    ui.notify('Full historical data ingestion job triggered successfully!')
+                )).props('outline round color=blue').tooltip('Downloads maximum available historical data')
 
     @ui.page('/jobs')
     def jobs_page() -> None:
@@ -464,6 +474,158 @@ def init(fastapi_app: FastAPI) -> None:
         
         # Add benchmark trigger button
         ui.button('Trigger Benchmark', on_click=run_benchmark).props('outline round').classes('my-4')
+
+    @ui.page('/strategy')
+    def strategy_page() -> None:
+        from data_collector_unit_poc.jobs.commodities import ALL_COMMODITIES
+        
+        with ui.header(elevated=True).classes('items-center justify-between w-full p-4'):
+            ui.label('Trading Strategy Testing').classes('text-2xl')
+            with ui.row().classes('gap-2'):
+                ui.button('Back to Home', on_click=lambda: ui.navigate.to('/')).props('outline round')
+
+        add_navigation()
+
+        # Add commodity selector
+        commodity_select = ui.select(
+            {symbol: f"{name} ({symbol})" for symbol, name, _, _ in ALL_COMMODITIES},
+            label='Select Commodity',
+            value=ALL_COMMODITIES[0][0]  # Default to first commodity
+        ).classes('w-64')
+
+        # Add SMA period inputs
+        with ui.row().classes('gap-4 my-4'):
+            sma_fast = ui.number('Fast SMA Period', value=10, min=1, max=200).classes('w-40')
+            sma_slow = ui.number('Slow SMA Period', value=30, min=1, max=200).classes('w-40')
+
+        # Create containers for results
+        chart_container = ui.element('div').classes('w-full my-4')
+        stats_container = ui.element('div').classes('w-full my-4')
+
+        def calculate_strategy(df: pd.DataFrame, fast_period: int, slow_period: int) -> pd.DataFrame:
+            """Calculate moving averages and generate trading signals"""
+            df = df.copy()
+            df['SMA_fast'] = df['close'].rolling(window=fast_period).mean()
+            df['SMA_slow'] = df['close'].rolling(window=slow_period).mean()
+            
+            # Generate signals (1 for buy, -1 for sell)
+            df['signal'] = 0
+            df.loc[df['SMA_fast'] > df['SMA_slow'], 'signal'] = 1
+            df.loc[df['SMA_fast'] < df['SMA_slow'], 'signal'] = -1
+            
+            # Calculate daily returns
+            df['returns'] = df['close'].pct_change()
+            
+            # Calculate strategy returns (position * next day's return)
+            df['strategy_returns'] = df['signal'].shift(1) * df['returns']
+            
+            return df
+
+        def calculate_metrics(df: pd.DataFrame) -> dict:
+            """Calculate strategy performance metrics"""
+            # Calculate cumulative returns
+            cum_returns = (1 + df['strategy_returns']).cumprod()
+            
+            # Basic metrics
+            total_return = cum_returns.iloc[-1] - 1
+            annual_return = (1 + total_return) ** (252 / len(df)) - 1
+            daily_std = df['strategy_returns'].std()
+            sharpe = np.sqrt(252) * df['strategy_returns'].mean() / daily_std
+            
+            # Calculate max drawdown
+            rolling_max = cum_returns.expanding().max()
+            drawdowns = cum_returns / rolling_max - 1
+            max_drawdown = drawdowns.min()
+            
+            return {
+                'Total Return': f"{total_return:.2%}",
+                'Annual Return': f"{annual_return:.2%}",
+                'Sharpe Ratio': f"{sharpe:.2f}",
+                'Max Drawdown': f"{max_drawdown:.2%}",
+                'Number of Trades': len(df[df['signal'].diff() != 0])
+            }
+
+        def update_strategy(*_):
+            symbol = commodity_select.value['value'] if isinstance(commodity_select.value, dict) else commodity_select.value
+            if not symbol:
+                return
+            
+            # Read data
+            df = read_commodity_data(symbol)
+            if df is None or df.empty:
+                ui.notify('No data available for selected commodity', type='negative')
+                return
+
+            # Calculate strategy
+            df = calculate_strategy(df, int(sma_fast.value), int(sma_slow.value))
+            
+            # Clear containers
+            chart_container.clear()
+            stats_container.clear()
+            
+            # Create price and MA chart
+            with chart_container:
+                fig = go.Figure()
+                
+                # Add price line
+                fig.add_trace(go.Scatter(
+                    x=df['date'],
+                    y=df['close'],
+                    name='Price',
+                    line=dict(color='black')
+                ))
+                
+                # Add moving averages
+                fig.add_trace(go.Scatter(
+                    x=df['date'],
+                    y=df['SMA_fast'],
+                    name=f'SMA {int(sma_fast.value)}',
+                    line=dict(color='blue')
+                ))
+                
+                fig.add_trace(go.Scatter(
+                    x=df['date'],
+                    y=df['SMA_slow'],
+                    name=f'SMA {int(sma_slow.value)}',
+                    line=dict(color='red')
+                ))
+                
+                # Update layout
+                fig.update_layout(
+                    title='Price and Moving Averages',
+                    xaxis_title='Date',
+                    yaxis_title='Price',
+                    height=500
+                )
+                
+                ui.plotly(fig).classes('w-full')
+            
+            # Calculate and display metrics
+            metrics = calculate_metrics(df)
+            with stats_container:
+                ui.label('Strategy Performance Metrics').classes('text-xl mb-4')
+                with ui.grid(columns=3).classes('gap-4'):
+                    for metric, value in metrics.items():
+                        with ui.card():
+                            ui.label(metric).classes('text-lg')
+                            ui.label(value).classes('text-2xl font-bold')
+
+        # Add update button
+        ui.button('Calculate Strategy', on_click=update_strategy).props('outline').classes('my-4')
+
+        # Add strategy description
+        with ui.card().classes('mt-4 p-4'):
+            ui.label('Strategy Description').classes('text-lg font-bold')
+            ui.label('''
+                This is a simple Moving Average Crossover strategy:
+                - Buy when the fast SMA crosses above the slow SMA
+                - Sell when the fast SMA crosses below the slow SMA
+                
+                The strategy assumes:
+                - Equal position sizes for all trades
+                - No transaction costs
+                - Ability to execute at closing prices
+            ''').classes('whitespace-pre-line mt-2')
 
     ui.run_with(
         fastapi_app,

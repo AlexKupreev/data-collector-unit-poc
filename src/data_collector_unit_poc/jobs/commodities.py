@@ -85,7 +85,7 @@ def get_commodity_info(symbol: str, name: str, exchange: str, unit: str) -> Comm
         print(f"Error fetching info for {symbol}: {str(e)}")
         return None
 
-def download_commodity_historical_data(symbol: str, period: str = "1y") -> pd.DataFrame:
+def download_commodity_historical_data(symbol: str, period: str = "max") -> pd.DataFrame:
     """Download historical data for a commodity in bulk"""
     try:
         ticker = yf.Ticker(symbol)
@@ -199,8 +199,13 @@ def store_commodity_data(symbol: str, df: pd.DataFrame, cancel_event=None):
     except Exception as e:
         print(f"Error storing {symbol} data in Parquet format: {str(e)}")
 
-def ingest_commodity_data_job(cancel_event=None):
-    """Ingest commodity market data"""
+def ingest_commodity_data_job(cancel_event=None, period: str = "max"):
+    """Ingest commodity market data
+    
+    Args:
+        cancel_event: Event to cancel the job
+        period: Valid periods: 1d,5d,1mo,3mo,6mo,1y,2y,5y,10y,ytd,max
+    """
     total_commodities = len(ALL_COMMODITIES)
     for idx, (symbol, name, exchange, unit) in enumerate(ALL_COMMODITIES, 1):
         if cancel_event and cancel_event.is_set():
@@ -215,11 +220,19 @@ def ingest_commodity_data_job(cancel_event=None):
             print(f"Retrieved info for {symbol}: {info.name} ({info.category})")
         
         # Get historical data
-        historical_data = download_commodity_historical_data(symbol)
+        historical_data = download_commodity_historical_data(symbol, period)
         store_commodity_data(symbol, historical_data, cancel_event)
         
         # Sleep to avoid hitting API rate limits
         time.sleep(2)
+
+def ingest_commodity_initial_data_job(cancel_event=None):
+    """Ingest maximum available historical data for all commodities"""
+    return ingest_commodity_data_job(cancel_event, period="max")
+
+def ingest_commodity_daily_data_job(cancel_event=None):
+    """Ingest last day's data for all commodities"""
+    return ingest_commodity_data_job(cancel_event, period="1d")
 
 if __name__ == "__main__":
     started_at = time.time()

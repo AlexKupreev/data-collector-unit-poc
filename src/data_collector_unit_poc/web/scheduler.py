@@ -11,7 +11,10 @@ from apscheduler.triggers.date import DateTrigger
 from apscheduler.job import Job
 
 from data_collector_unit_poc.jobs.weather import ingest_noaa_isd_lite_job
-from data_collector_unit_poc.jobs.commodities import ingest_commodity_data_job
+from data_collector_unit_poc.jobs.commodities import (
+    ingest_commodity_initial_data_job,
+    ingest_commodity_daily_data_job
+)
 
 # Track currently running jobs and their cancellation flags
 running_jobs: Dict[str, threading.Event] = {}
@@ -44,10 +47,16 @@ def wrapped_ingest_noaa_isd_lite_job(**kwargs):
     return ingest_noaa_isd_lite_job(cancel_event=cancel_event)
 
 @track_job_execution
-def wrapped_ingest_commodity_data_job(**kwargs):
+def wrapped_ingest_commodity_initial_data_job(**kwargs):
     cancel_event = kwargs.pop('cancel_event', None)
     # Pass the cancel_event to the actual job function
-    return ingest_commodity_data_job(cancel_event=cancel_event)
+    return ingest_commodity_initial_data_job(cancel_event=cancel_event)
+
+@track_job_execution
+def wrapped_ingest_commodity_daily_data_job(**kwargs):
+    cancel_event = kwargs.pop('cancel_event', None)
+    # Pass the cancel_event to the actual job function
+    return ingest_commodity_daily_data_job(cancel_event=cancel_event)
 
 
 def build_now_trigger() -> DateTrigger:
@@ -115,10 +124,10 @@ scheduler.add_job(
 )
 
 # Schedule commodity data ingestion (run at 7 AM daily)
-ingest_commodity_data_trigger = CronTrigger(hour="7")
+ingest_commodity_daily_trigger = CronTrigger(hour="7")
 scheduler.add_job(
-    wrapped_ingest_commodity_data_job,  # Use wrapped version
-    ingest_commodity_data_trigger
+    wrapped_ingest_commodity_daily_data_job,  # Use wrapped version for daily updates
+    ingest_commodity_daily_trigger
 )
 
 scheduler.start()
