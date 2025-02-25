@@ -15,6 +15,7 @@ from data_collector_unit_poc.jobs.commodities import (
     ingest_commodity_initial_data_job,
     ingest_commodity_daily_data_job
 )
+from data_collector_unit_poc.jobs.coal_prediction import predict_coal_prices_job
 
 # Track currently running jobs and their cancellation flags
 running_jobs: Dict[str, threading.Event] = {}
@@ -57,6 +58,12 @@ def wrapped_ingest_commodity_daily_data_job(**kwargs):
     cancel_event = kwargs.pop('cancel_event', None)
     # Pass the cancel_event to the actual job function
     return ingest_commodity_daily_data_job(cancel_event=cancel_event)
+
+@track_job_execution
+def wrapped_predict_coal_prices_job(**kwargs):
+    cancel_event = kwargs.pop('cancel_event', None)
+    # Pass the cancel_event to the actual job function
+    return predict_coal_prices_job(cancel_event=cancel_event)
 
 
 def build_now_trigger() -> DateTrigger:
@@ -128,6 +135,13 @@ ingest_commodity_daily_trigger = CronTrigger(hour="7")
 scheduler.add_job(
     wrapped_ingest_commodity_daily_data_job,  # Use wrapped version for daily updates
     ingest_commodity_daily_trigger
+)
+
+# Schedule coal price prediction (run at 9 AM daily)
+predict_coal_prices_trigger = CronTrigger(hour="9")
+scheduler.add_job(
+    wrapped_predict_coal_prices_job,  # Use wrapped version
+    predict_coal_prices_trigger
 )
 
 scheduler.start()
